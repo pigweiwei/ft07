@@ -3,19 +3,29 @@ name: 检测A股上涨下跌家数并推送
 on:
   schedule:
     - cron: "*/15 * * * *"  # 每15分钟执行一次
-  workflow_dispatch:        # 可手动运行
+  workflow_dispatch:        # 可手动触发
 
 jobs:
   check_a_shares:
     runs-on: ubuntu-latest
 
     steps:
+      - name: 安装 jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
       - name: 获取上涨下跌家数并推送
         run: |
-          # 获取A股全部行情（最多5000只）
-          data=$(curl -s "https://push2.eastmoney.com/api/qt/ulist/get?pn=1&pz=5000&fs=m:0+t:6,m:0+t:13&fields=f3")
+          # 使用浏览器头模拟请求，避免接口被限制
+          data=$(curl -s "https://push2.eastmoney.com/api/qt/ulist/get?pn=1&pz=5000&fs=m:0+t:6,m:0+t:13&fields=f3" \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")
 
-          # 解析出涨跌幅统计
+          # 检查接口返回是否有效
+          if echo "$data" | grep -q '"diff":null'; then
+            echo "获取行情数据失败，接口可能被限制"
+            exit 1
+          fi
+
+          # 解析涨跌幅统计
           up=$(echo "$data" | jq '[.data.diff[] | select(.f3 > 0)] | length')
           down=$(echo "$data" | jq '[.data.diff[] | select(.f3 < 0)] | length')
 
