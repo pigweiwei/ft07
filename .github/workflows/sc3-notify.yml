@@ -15,6 +15,6 @@ jobs:
           title="这是GitHub Actions的测试消息"
           desp="测试成功：说明你的Server酱推送API工作正常 ✅"
           
-          curl -G "https://12404.push.ft07.com/send/sctp12404t9hn7aimbwueu29q2cnvxkl.send" \
+          curl -G "https://12404.push.ft07.com/send/${{ secrets.SERVERCHAN_KEY }}.send" \
             --data-urlencode "title=$title" \
             --data-urlencode "desp=$desp"
