@@ -1,0 +1,19 @@
+name: Server酱 SC3 通知
+
+on:
+  push:
+    branches: [main]  # 修改为你想监听的分支
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 发送 SC3 消息
+        run: |
+          curl -X POST "https://sc3.ft07.com/${{ secrets.SC3_KEY }}.send" \
+            -d "text=🚀 GitHub 推送通知" \
+            -d "desp=**仓库**: ${{ github.repository }}
+**分支**: ${{ github.ref_name }}
+**提交**: ${{ github.sha }}
+**作者**: ${{ github.actor }}
+[查看详情](${{ github.server_url }}/${{ github.repository }}/actions)"
