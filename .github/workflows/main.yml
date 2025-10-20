@@ -10,6 +10,6 @@ jobs:
         env:
           SC3_KEY: ${{ secrets.SC3_KEY }}
         run: |
-          curl -X POST "https://sc3.ft07.com/${{ secrets.SC3_KEY }}.send" \
+          curl -X POST "https://12404.push.ft07.com/${{ secrets.SC3_KEY }}.send" \
             -d "text=✅ Actions 启动成功！" \
             -d "desp=**时间**: $(date)\n**仓库**: ${{ github.repository }}\n**测试通过！**"
