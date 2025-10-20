@@ -1,20 +1,32 @@
-name: 测试 Server酱 推送
+name: 检测A股上涨下跌家数并推送
 
 on:
   schedule:
     - cron: "*/15 * * * *"  # 每15分钟执行一次
-  workflow_dispatch:        # 可手动触发
+  workflow_dispatch:        # 可手动运行
 
 jobs:
-  send_test_message:
+  check_a_shares:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 发送测试推送
+      - name: 获取上涨下跌家数并推送
         run: |
-          title="这是GitHub Actions的测试消息"
-          desp="测试成功：说明你的Server酱推送API工作正常 ✅"
-          
+          # 获取A股全部行情（最多5000只）
+          data=$(curl -s "https://push2.eastmoney.com/api/qt/ulist/get?pn=1&pz=5000&fs=m:0+t:6,m:0+t:13&fields=f3")
+
+          # 解析出涨跌幅统计
+          up=$(echo "$data" | jq '[.data.diff[] | select(.f3 > 0)] | length')
+          down=$(echo "$data" | jq '[.data.diff[] | select(.f3 < 0)] | length')
+
+          # 输出日志
+          echo "上涨家数: $up"
+          echo "下跌家数: $down"
+
+          # 推送到 Server酱
+          title="A股上涨下跌家数检测"
+          desp="当前上涨家数：$up\n当前下跌家数：$down\n更新时间：$(date '+%Y-%m-%d %H:%M:%S')"
+
           curl -G "https://12404.push.ft07.com/send/${{ secrets.SERVERCHAN_KEY }}.send" \
             --data-urlencode "title=$title" \
             --data-urlencode "desp=$desp"
