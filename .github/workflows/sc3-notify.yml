@@ -1,7 +1,20 @@
-- name: 推送通知
-  run: |
-    title="这是GitHub Actions的测试消息"
-    desp="测试成功：来自安全模式 ✅"
-    curl -G "https://12404.push.ft07.com/send/${{ secrets.SERVERCHAN_KEY }}.send" \
-      --data-urlencode "title=$title" \
-      --data-urlencode "desp=$desp"
+name: 测试 Server酱 推送
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"  # 每15分钟执行一次
+  workflow_dispatch:        # 可手动触发
+
+jobs:
+  send_test_message:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 发送测试推送
+        run: |
+          title="这是GitHub Actions的测试消息"
+          desp="测试成功：说明你的Server酱推送API工作正常 ✅"
+          
+          curl -G "https://12404.push.ft07.com/send/${{ secrets.SERVERCHAN_KEY }}.send" \
+            --data-urlencode "title=$title" \
+            --data-urlencode "desp=$desp"
