@@ -1,0 +1,30 @@
+name: 检测A股下跌家数并推送通知
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"  # 每15分钟执行一次
+  workflow_dispatch:        # 允许手动运行
+
+jobs:
+  check_a_shares:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 获取下跌家数
+        id: fetch
+        run: |
+          # 获取东方财富A股市场总体数据（包含上涨下跌家数）
+          data=$(curl -s "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&fields=f104&secids=1.000001")
+          
+          # 从返回数据中提取下跌家数（f104字段是下跌家数）
+          down=$(echo "$data" | grep -o '"f104":[0-9]*' | head -n1 | cut -d: -f2)
+          
+          echo "down=$down" >> $GITHUB_OUTPUT
+          echo "当前下跌家数：$down"
+
+      - name: 判断并推送 Server酱 通知
+        if: ${{ steps.fetch.outputs.down > 3500 }}
+        run: |
+          curl -X POST https://sctapi.ftqq.com/${{ secrets.SERVERCHAN_KEY }}.send \
+            -d "title=A股预警：下跌家数超过3500家🚨" \
+            -d "desp=当前下跌家数：${{ steps.fetch.outputs.down }}%0A数据来源：东方财富%0A时间：$(date '+%Y-%m-%d %H:%M:%S')"
