@@ -1,70 +1,20 @@
-name: A股上涨提醒 - Server酱 SC3
+name: 测试 Server酱 推送
 
 on:
   schedule:
-    - cron: '0 7 * * 1-5'  # 每天 UTC 7:00 (北京 15:00，收盘后检查；周一到周五)
-  workflow_dispatch:  # 支持手动触发测试
+    - cron: "*/15 * * * *"  # 每15分钟执行一次
+  workflow_dispatch:        # 可手动触发
 
 jobs:
-  check-stock:
+  send_test_message:
     runs-on: ubuntu-latest
+
     steps:
-      - name: 安装 Python 依赖
+      - name: 发送测试推送
         run: |
-          sudo apt update
-          sudo apt install python3-pip
-          pip3 install requests pandas
-
-      - name: 运行 A股上涨检查脚本
-        env:
-          SC3_KEY: ${{ secrets.SC3_KEY }}
-        run: python3 -c "
-import requests
-import pandas as pd
-import json
-from datetime import datetime
-
-# Ashare 核心函数：获取涨跌家数 (从新浪抓取)
-def get_up_down_count():
-    url = 'http://qh1.sse.comnc.cn/uc/service?callback=abc&action=market.uc.getMarketData&marketId=0'
-    resp = requests.get(url).text
-    data = resp[3:-1]  # 移除 callback
-    df = pd.read_json(data)
-    up_count = len(df[df['changeRate'] > 0])  # 上涨家数
-    down_count = len(df[df['changeRate'] < 0])  # 下跌家数
-    flat_count = len(df[df['changeRate'] == 0])  # 平盘家数
-    return up_count, down_count, flat_count, df
-
-# 获取涨幅前5股票
-def get_top_gainers(df, top_n=5):
-    gainers = df.nlargest(top_n, 'changeRate')[['name', 'changeRate', 'price']]
-    return gainers.to_markdown(index=False)
-
-up, down, flat, df = get_up_down_count()
-
-if up > 1000:
-    top5 = get_top_gainers(df)
-    title = f'🚀 A股大涨警报！上涨 {up} 家'
-    content = f'''
-**市场快报** (今日 {datetime.now().strftime('%Y-%m-%d')}):
-- 上涨: {up} 家
-- 下跌: {down} 家
-- 平盘: {flat} 家
-
-**涨幅前 5 名**:
-{top5}
-
-[查看详情](http://quote.eastmoney.com/center/gridlist.html#hs_a_board)
-'''
-    
-    # 发送 SC3 通知
-    api_url = f'https://sc3.ft07.com/{SC3_KEY}.send'
-    data = {'text': title, 'desp': content}
-    resp = requests.post(api_url, data=data)
-    if resp.status_code == 200:
-        print('✅ 通知发送成功！')
-    else:
-        print(f'❌ 发送失败: {resp.text}')
-else:
-    print(f'📊 上涨家数 {up} ≤ 1000，无需提醒')
-"
+          title="这是GitHub Actions的测试消息"
+          desp="测试成功：说明你的Server酱推送API工作正常 ✅"
+          
+          curl -G "https://12404.push.ft07.com/send/sctp12404t9hn7aimbwueu29q2cnvxkl.send" \
+            --data-urlencode "title=$title" \
+            --data-urlencode "desp=$desp"
