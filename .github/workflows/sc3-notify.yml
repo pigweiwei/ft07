@@ -2,12 +2,14 @@ name: 同花顺市场家数推送
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/15 * * * *"  # 每15分钟执行一次
   workflow_dispatch:
 
 jobs:
   ths_web_scrape:
     runs-on: ubuntu-latest
+    env:
+      SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
     steps:
       - name: 安装 Python
         uses: actions/setup-python@v4
@@ -16,46 +18,37 @@ jobs:
 
       - name: 安装依赖
         run: |
-          python -m pip install --upgrade pip
-          pip install requests beautifulsoup4
+          pip install --upgrade pip
+          pip install requests
 
-      - name: 获取同花顺网页数据并推送
+      - name: 获取同花顺 AJAX 数据并推送
         run: |
           python - <<'EOF'
           import requests
-          from bs4 import BeautifulSoup
           import os
 
-          url = "https://q.10jqka.com.cn/"
+          # Ajax URL（示例，需要用开发者工具抓取实际可用 URL）
+          url = "https://q.10jqka.com.cn/gn/"
           headers = {
               "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
           }
 
           try:
               resp = requests.get(url, headers=headers, timeout=10)
-              resp.encoding = 'gbk'  # 同花顺网页是 GBK 编码
-              html = resp.text
+              # 如果返回 JSON，直接解析；如果是 HTML，需要再找 Ajax URL
+              data = resp.json() if resp.headers.get('Content-Type','').startswith('application/json') else {}
 
-              # 解析 HTML
-              soup = BeautifulSoup(html, 'html.parser')
-              text = soup.get_text()
-
-              # 提取上涨家数和下跌家数
-              import re
-              up_match = re.search(r'上涨家数\s*(\d+)', text)
-              down_match = re.search(r'下跌家数\s*(\d+)', text)
-
-              up_count = int(up_match.group(1)) if up_match else 0
-              down_count = int(down_match.group(1)) if down_match else 0
+              # 假设 JSON 里有 RISECOUNT 和 FALLCOUNT
+              up_count = int(data.get("RISECOUNT", 0))
+              down_count = int(data.get("FALLCOUNT", 0))
 
               print(f"📈 上涨家数: {up_count}")
               print(f"📉 下跌家数: {down_count}")
 
-              # 判断是否手动运行
+              # 手动触发推送或条件触发
               event_name = os.environ.get('GITHUB_EVENT_NAME', '')
               force_push = event_name == 'workflow_dispatch'
 
-              # 判断是否触发推送条件
               if force_push or up_count > 3000 or down_count > 3000:
                   title = "🧭 同花顺市场家数监控"
                   if down_count > 3000:
@@ -64,7 +57,6 @@ jobs:
                       title = "📈 上涨家数过多"
                   desp = f"上涨家数：{up_count}\n下跌家数：{down_count}"
 
-                  # 推送 Server酱
                   key = os.environ.get('SERVERCHAN_KEY', '')
                   if key:
                       push_url = f"https://12404.push.ft07.com/send/{key}.send"
