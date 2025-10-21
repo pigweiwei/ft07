@@ -11,15 +11,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 获取涨跌家数
+      - name: 获取涨跌家数（新版接口）
         id: fetch
         run: |
-          # 东方财富A股市场总体数据接口（使用 newget 接口）
-          data=$(curl -s "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=1.000001,0.399001,0.399006&fields=f62,f104,f105")
+          # 东方财富新接口：获取市场总览
+          data=$(curl -s "https://push2.eastmoney.com/api/qt/ulist/get?pn=1&pz=1&fs=m:1+t:2&fields=f104,f105")
 
-          # 提取上涨家数与下跌家数
           up=$(echo "$data" | grep -o '"f104":[0-9]*' | head -1 | cut -d':' -f2)
           down=$(echo "$data" | grep -o '"f105":[0-9]*' | head -1 | cut -d':' -f2)
+
+          # 如果数据为空，再尝试备用接口（沪深300接口）
+          if [ -z "$up" ] || [ -z "$down" ]; then
+            data=$(curl -s "https://push2.eastmoney.com/api/qt/ulist/get?pn=1&pz=1&fs=m:0+t:6&fields=f104,f105")
+            up=$(echo "$data" | grep -o '"f104":[0-9]*' | head -1 | cut -d':' -f2)
+            down=$(echo "$data" | grep -o '"f105":[0-9]*' | head -1 | cut -d':' -f2)
+          fi
 
           echo "上涨家数: $up"
           echo "下跌家数: $down"
