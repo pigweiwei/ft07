@@ -1,4 +1,3 @@
-```yaml
 name: 检测A股涨跌家数并推送通知
 
 on:
@@ -120,13 +119,13 @@ jobs:
         run: |
           up_total=${{ env.up_total }}
           down_total=${{ env.down_total }}
-          error_msg=${{ env.error_msg }}
+          error_msg="${{ env.error_msg }}"
 
           title=""
-          desp="上涨家数：${up_total}%0A下跌家数：${down_total}"
+          desp="上涨家数：${up_total}\n下跌家数：${down_total}"
           if [ -n "$error_msg" ]; then
             title="⚠️ A股数据异常（均为0）！"
-            desp="$desp%0A%0A⚠️ 错误信息：$error_msg"
+            desp="$desp\n\n⚠️ 错误信息：$error_msg"
           else
             if [ "$up_total" -gt 3000 ]; then
               title="📈 合计上涨家数超过3000家！"
@@ -142,4 +141,3 @@ jobs:
           curl -G "https://12404.push.ft07.com/send/${{ secrets.SERVERCHAN_KEY }}.send" \
             --data-urlencode "title=$title" \
             --data-urlencode "desp=$desp"
-```
