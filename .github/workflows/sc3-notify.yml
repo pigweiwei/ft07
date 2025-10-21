@@ -68,8 +68,8 @@ jobs:
 
                   key = os.environ.get('SERVERCHAN_KEY', '')
                   if key:
-                      push_url = f"https://sc.ftqq.com/{key}.send"
-                      requests.get(push_url, params={"text": title, "desp": desp})
+                      push_url = f"https://12404.push.ft07.com/send/{key}.send"
+                      requests.get(push_url, params={"title": title, "desp": desp})
                       print("🚀 推送完成")
                   else:
                       print("⚠️ SERVERCHAN_KEY 未设置")
