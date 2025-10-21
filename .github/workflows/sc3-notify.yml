@@ -122,8 +122,18 @@ jobs:
           error_msg="${{ env.error_msg }}"
 
           title=""
-          desp="上涨家数：${up_total}  
-          下跌家数：${down_total}"
+          up_total=50
+          down_total=50
+          total=$((up_total + down_total))
+
+         # 计算百分比
+         up_percent=$((up_total * 100 / total))
+         down_percent=$((down_total * 100 / total))
+
+         desp="上涨家数：${up_total} (${up_percent}%)  
+         下跌家数：${down_total} (${down_percent}%)  
+         总计家数：${total}"
+
           if [ -n "$error_msg" ]; then
             title="⚠️ A股数据异常（均为0）！"
             desp="$desp\n\n⚠️ 错误信息：$error_msg"
