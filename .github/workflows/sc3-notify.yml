@@ -28,7 +28,6 @@ jobs:
           echo "down=$down" >> $GITHUB_ENV
 
       - name: 判断并推送
-        if: env.up != '' && env.down != ''
         run: |
           up=${{ env.up }}
           down=${{ env.down }}
@@ -36,13 +35,19 @@ jobs:
           title=""
           desp="当前上涨家数：${up}\n当前下跌家数：${down}\n\n📊 数据来源：网易财经"
 
-          if [ "$up" -gt 3000 ]; then
-            title="📈 上涨家数超过3000家！"
-          elif [ "$down" -gt 3000 ]; then
-            title="📉 下跌家数超过3000家！"
+          # 判断触发来源
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            title="🧪 手动测试推送"
+            echo "检测到手动运行，强制推送当前数据。"
           else
-            echo "涨跌家数均未超过3000，无需推送。"
-            exit 0
+            if [ "$up" -gt 3000 ]; then
+              title="📈 上涨家数超过3000家！"
+            elif [ "$down" -gt 3000 ]; then
+              title="📉 下跌家数超过3000家！"
+            else
+              echo "涨跌家数均未超过3000，无需推送。"
+              exit 0
+            fi
           fi
 
           echo "发送推送：$title"
