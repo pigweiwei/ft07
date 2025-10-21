@@ -19,33 +19,42 @@ jobs:
       - name: 安装依赖
         run: |
           pip install --upgrade pip
-          pip install requests
+          pip install requests beautifulsoup4
 
-      - name: 获取同花顺 AJAX 数据并推送
+      - name: 获取同花顺网页数据并推送
         run: |
           python - <<'EOF'
           import requests
+          from bs4 import BeautifulSoup
           import os
 
-          # Ajax URL（示例，需要用开发者工具抓取实际可用 URL）
+          # 同花顺市场总览页面 URL
           url = "https://q.10jqka.com.cn/gn/"
+
           headers = {
               "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
           }
 
           try:
-              resp = requests.get(url, headers=headers, timeout=10)
-              # 如果返回 JSON，直接解析；如果是 HTML，需要再找 Ajax URL
-              data = resp.json() if resp.headers.get('Content-Type','').startswith('application/json') else {}
+              # 获取网页内容
+              response = requests.get(url, headers=headers)
+              response.raise_for_status()
 
-              # 假设 JSON 里有 RISECOUNT 和 FALLCOUNT
-              up_count = int(data.get("RISECOUNT", 0))
-              down_count = int(data.get("FALLCOUNT", 0))
+              # 使用 BeautifulSoup 解析网页
+              soup = BeautifulSoup(response.text, 'html.parser')
+
+              # 查找包含上涨家数和下跌家数的元素
+              rise_count_element = soup.find('span', {'id': 'RISECOUNT'})
+              fall_count_element = soup.find('span', {'id': 'FALLCOUNT'})
+
+              # 提取上涨家数和下跌家数
+              up_count = int(rise_count_element.text.strip()) if rise_count_element else 0
+              down_count = int(fall_count_element.text.strip()) if fall_count_element else 0
 
               print(f"📈 上涨家数: {up_count}")
               print(f"📉 下跌家数: {down_count}")
 
-              # 手动触发推送或条件触发
+              # 判断是否需要推送
               event_name = os.environ.get('GITHUB_EVENT_NAME', '')
               force_push = event_name == 'workflow_dispatch'
 
@@ -59,8 +68,8 @@ jobs:
 
                   key = os.environ.get('SERVERCHAN_KEY', '')
                   if key:
-                      push_url = f"https://12404.push.ft07.com/send/{key}.send"
-                      requests.get(push_url, params={"title": title, "desp": desp})
+                      push_url = f"https://sc.ftqq.com/{key}.send"
+                      requests.get(push_url, params={"text": title, "desp": desp})
                       print("🚀 推送完成")
                   else:
                       print("⚠️ SERVERCHAN_KEY 未设置")
