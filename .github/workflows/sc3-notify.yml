@@ -1,38 +1,72 @@
-name: 获取A股涨跌家数并推送通知
+name: 检测A股涨跌家数并推送通知
 
 on:
   schedule:
     - cron: "*/15 * * * *"  # 每15分钟执行一次
-  workflow_dispatch:        # 支持手动触发
+  workflow_dispatch:        # 支持手动运行
 
 jobs:
   check_a_shares:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 获取涨跌家数(新浪财经接口)
+      - name: 获取涨跌家数（东方财富接口）
         run: |
-          echo "正在获取A股市场数据（新浪财经接口）..."
+          echo "📊 正在获取东方财富市场数据..."
 
-          # 使用新浪接口，GitHub国外服务器能访问
-          data=$(curl -s "https://hq.sinajs.cn/list=sh000001,sz399001" | iconv -f gbk -t utf-8)
+          # 获取东方财富A股总体行情
+          resp=$(curl -s "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&invt=2&pi=1&pz=1&fid=f3&fs=m:1+t:2,m:0+t:6&fields=f104,f105" | iconv -f gbk -t utf-8)
+          echo "原始返回：$resp"
 
-          echo "原始返回：$data"
+          # 提取上涨家数和下跌家数
+          up_count=$(echo "$resp" | grep -o '"f104":[0-9]*' | head -n1 | awk -F: '{print $2}')
+          down_count=$(echo "$resp" | grep -o '"f105":[0-9]*' | head -n1 | awk -F: '{print $2}')
 
-          # 如果返回为空，推送一条测试消息
-          if [[ -z "$data" ]]; then
-            echo "❌ 未获取到数据，强制推送测试消息"
-            title="⚠️ 测试推送（未获取到数据）"
-            desp="可能被拦截或网络错误"
+          # 防止为空的情况
+          up_count=${up_count:-0}
+          down_count=${down_count:-0}
+
+          echo "上涨家数：$up_count"
+          echo "下跌家数：$down_count"
+
+          # 当前时间（东八区）
+          hour=$(date -u +"%H")
+          minute=$(date -u +"%M")
+          weekday=$(date -u +"%u")
+          hour_cn=$(( (hour + 8) % 24 ))
+
+          # 判断是否为手动运行
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "🟢 手动运行，强制推送一次"
+            force_push=true
           else
-            # 提取示例数值（注意：新浪接口不提供家数，这里只是演示）
-            sh_val=$(echo "$data" | grep -oE '[0-9]+\.[0-9]+' | head -n 1)
-            sz_val=$(echo "$data" | grep -oE '[0-9]+\.[0-9]+' | head -n 2 | tail -n 1)
-
-            title="📈 A股市场情绪监控"
-            desp="上证指数: ${sh_val}\n深证指数: ${sz_val}\n\n（本次为测试推送，接口运行正常）"
+            force_push=false
           fi
 
-          echo "准备推送..."
-          # ⚠️ 把 XXXXXX 改成你自己的 Server酱 Key
-          curl -s "https://sc3.ft07.com/send/XXXXXX.send?title=${title}&desp=${desp}"
+          # 判断是否在交易时间（周一到周五，9:15~15:00）
+          if [ "$weekday" -lt 6 ] && [ "$hour_cn" -ge 9 ] && [ "$hour_cn" -lt 15 ]; then
+            in_time=true
+          else
+            in_time=false
+          fi
+
+          # 判断是否触发推送条件
+          if $force_push || ([ "$in_time" = true ] && { [ "$up_count" -gt 3000 ] || [ "$down_count" -gt 3000 ]; }); then
+            if [ "$down_count" -gt 3000 ]; then
+              title="📉 下跌家数过多提醒"
+              desp="下跌家数：${down_count}\n上涨家数：${up_count}\n市场偏弱，注意风险⚠️"
+            elif [ "$up_count" -gt 3000 ]; then
+              title="📈 上涨家数过多提醒"
+              desp="上涨家数：${up_count}\n下跌家数：${down_count}\n市场情绪偏强💪"
+            else
+              title="🧭 当前市场家数（手动推送）"
+              desp="上涨家数：${up_count}\n下跌家数：${down_count}\n手动触发测试推送✅"
+            fi
+
+            echo "🚀 正在推送 Server酱 消息..."
+            curl -s "https://12404.push.ft07.com/send/${{ secrets.SERVERCHAN_KEY }}.send" \
+              --data-urlencode "title=$title" \
+              --data-urlencode "desp=$desp"
+          else
+            echo "⏸️ 当前不在推送条件内（$hour_cn 点，weekday=$weekday，force=$force_push）"
+          fi
