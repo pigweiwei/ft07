@@ -17,5 +17,8 @@ jobs:
       with:
         python-version: '3.12'
     
+    - name: Install requests
+      run: pip install requests
+    
     - name: Run monitor script
       run: python monitor.py
