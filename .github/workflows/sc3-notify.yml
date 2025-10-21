@@ -25,42 +25,38 @@ jobs:
           down_sh=""  # 上证下跌
           up_sz=""  # 深证上涨
           down_sz=""  # 深证下跌
-          up_bj=""  # 北交所上涨
-          down_bj=""  # 北交所下跌
           up_total=""  # 合计上涨
           down_total=""  # 合计下跌
           data=""
           error_msg=""
           source="未知"
 
-          # 主接口：东方财富（上证+深证+北交所）
+          # 主接口：东方财富（上证+深证）
           echo "尝试东方财富接口..."
           data=$(curl -s -L -m 10 --compressed \
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
             -H "Referer: https://www.eastmoney.com" \
-            "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=1.000001,0.399001,1.430108&fields=f62,f104,f105")
+            "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=1.000001,0.399001,0.399006&fields=f62,f104,f105")
           status_code=$(curl -s -o /dev/null -w "%{http_code}" -L --compressed \
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
             -H "Referer: https://www.eastmoney.com" \
-            "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=1.000001,0.399001,1.430108&fields=f62,f104,f105")
+            "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=1.000001,0.399001,0.399006&fields=f62,f104,f105")
           echo "东方财富接口状态码: $status_code"
           echo "东方财富接口响应预览: $(echo "$data" | head -c 1000)..."
 
           if [ "$status_code" -eq 200 ] && [ -n "$data" ] && echo "$data" | jq . >/dev/null 2>&1; then
-            # 提取上证 (1.000001) [0]、深证成指 (0.399001) [1]、北交所 (1.430108) [2]
+            # 提取上证 (1.000001) 和深证成指 (0.399001)
             up_sh=$(echo "$data" | jq -r '.data.diff[0].f104 // ""')
             down_sh=$(echo "$data" | jq -r '.data.diff[0].f105 // ""')
             up_sz=$(echo "$data" | jq -r '.data.diff[1].f104 // ""')
             down_sz=$(echo "$data" | jq -r '.data.diff[1].f105 // ""')
-            up_bj=$(echo "$data" | jq -r '.data.diff[2].f104 // ""')
-            down_bj=$(echo "$data" | jq -r '.data.diff[2].f105 // ""')
-            if [ -n "$up_sh" ] && [ -n "$down_sh" ] && [ -n "$up_sz" ] && [ -n "$down_sz" ] && [ -n "$up_bj" ] && [ -n "$down_bj" ] && [ "$up_sh" != "0" ] && [ "$down_sh" != "0" ]; then
-              source="东方财富（上证+深证+北交所）"
+            if [ -n "$up_sh" ] && [ -n "$down_sh" ] && [ -n "$up_sz" ] && [ -n "$down_sz" ] && [ "$up_sh" != "0" ] && [ "$down_sh" != "0" ]; then
+              source="东方财富（上证+深证成指）"
               # 计算合计
-              up_total=$((up_sh + up_sz + up_bj))
-              down_total=$((down_sh + down_sz + down_bj))
+              up_total=$((up_sh + up_sz))
+              down_total=$((down_sh + down_sz))
             else
-              error_msg="东方财富数据无效 (上证: up=$up_sh, down=$down_sh; 深证: up=$up_sz, down=$down_sz; 北交所: up=$up_bj, down=$down_bj)"
+              error_msg="东方财富数据无效 (上证: up=$up_sh, down=$down_sh; 深证: up=$up_sz, down=$down_sz)"
             fi
           else
             error_msg="东方财富接口失败 (状态码: $status_code, 响应预览: $(echo "$data" | head -c 100))."
@@ -71,27 +67,25 @@ jobs:
             echo "东方财富失败或无效，尝试腾讯财经接口..."
             data=$(curl -s -L -m 10 --compressed \
               -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
-              "https://qt.gtimg.cn/q=ff_zs000001,ff_zs000002,ff_bj000001")
+              "https://qt.gtimg.cn/q=ff_zs000001,ff_zs000002")
             status_code=$(curl -s -o /dev/null -w "%{http_code}" -L --compressed \
               -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
-              "https://qt.gtimg.cn/q=ff_zs000001,ff_zs000002,ff_bj000001")
+              "https://qt.gtimg.cn/q=ff_zs000001,ff_zs000002")
             echo "腾讯财经接口状态码: $status_code"
             echo "腾讯财经接口响应预览: $(echo "$data" | head -c 1000)..."
 
             if [ "$status_code" -eq 200 ] && [ -n "$data" ]; then
-              # 提取上证 (zs000001)、深证 (zs000002)、北交所 (bj000001)
+              # 提取上证 (zs000001) 和深证 (zs000002)
               up_sh=$(echo "$data" | grep 'v_ff_zs000001="' | grep -o '上涨[0-9]*家' | grep -o '[0-9]*' || echo "")
               down_sh=$(echo "$data" | grep 'v_ff_zs000001="' | grep -o '下跌[0-9]*家' | grep -o '[0-9]*' || echo "")
               up_sz=$(echo "$data" | grep 'v_ff_zs000002="' | grep -o '上涨[0-9]*家' | grep -o '[0-9]*' || echo "")
               down_sz=$(echo "$data" | grep 'v_ff_zs000002="' | grep -o '下跌[0-9]*家' | grep -o '[0-9]*' || echo "")
-              up_bj=$(echo "$data" | grep 'v_ff_bj000001="' | grep -o '上涨[0-9]*家' | grep -o '[0-9]*' || echo "")
-              down_bj=$(echo "$data" | grep 'v_ff_bj000001="' | grep -o '下跌[0-9]*家' | grep -o '[0-9]*' || echo "")
-              if [ -n "$up_sh" ] && [ -n "$down_sh" ] && [ -n "$up_sz" ] && [ -n "$down_sz" ] && [ -n "$up_bj" ] && [ -n "$down_bj" ]; then
-                source="腾讯财经（上证+深证+北交所）"
-                up_total=$((up_sh + up_sz + up_bj))
-                down_total=$((down_sh + down_sz + down_bj))
+              if [ -n "$up_sh" ] && [ -n "$down_sh" ] && [ -n "$up_sz" ] && [ -n "$down_sz" ]; then
+                source="腾讯财经（上证+深证）"
+                up_total=$((up_sh + up_sz))
+                down_total=$((down_sh + down_sz))
               else
-                error_msg="$error_msg 腾讯财经提取失败 (上证: up=$up_sh, down=$down_sh; 深证: up=$up_sz, down=$down_sz; 北交所: up=$up_bj, down=$down_bj)."
+                error_msg="$error_msg 腾讯财经提取失败 (上证: up=$up_sh, down=$down_sh; 深证: up=$up_sz, down=$down_sz)."
               fi
             else
               error_msg="$error_msg 腾讯财经接口失败 (状态码: $status_code)."
@@ -107,20 +101,16 @@ jobs:
             down_sh=0
             up_sz=0
             down_sz=0
-            up_bj=0
-            down_bj=0
             up_total=0
             down_total=0
           else
-            echo "成功获取！上证上涨: $up_sh, 下跌: $down_sh; 深证上涨: $up_sz, 下跌: $down_sz; 北交所上涨: $up_bj, 下跌: $down_bj; 合计上涨: $up_total, 下跌: $down_total (来源: $source)"
+            echo "成功获取！上证上涨: $up_sh, 下跌: $down_sh; 深证上涨: $up_sz, 下跌: $down_sz; 合计上涨: $up_total, 下跌: $down_total (来源: $source)"
           fi
 
           echo "up_sh=$up_sh" >> $GITHUB_ENV
           echo "down_sh=$down_sh" >> $GITHUB_ENV
           echo "up_sz=$up_sz" >> $GITHUB_ENV
           echo "down_sz=$down_sz" >> $GITHUB_ENV
-          echo "up_bj=$up_bj" >> $GITHUB_ENV
-          echo "down_bj=$down_bj" >> $GITHUB_ENV
           echo "up_total=$up_total" >> $GITHUB_ENV
           echo "down_total=$down_total" >> $GITHUB_ENV
           echo "source=$source" >> $GITHUB_ENV
@@ -131,15 +121,13 @@ jobs:
           down_sh=${{ env.down_sh }}
           up_sz=${{ env.up_sz }}
           down_sz=${{ env.down_sz }}
-          up_bj=${{ env.up_bj }}
-          down_bj=${{ env.down_bj }}
           up_total=${{ env.up_total }}
           down_total=${{ env.down_total }}
           source="${{ env.source }}"
           error_msg="${{ env.error_msg }}"
 
           title=""
-          desp="上证上涨家数：${up_sh}\n上证下跌家数：${down_sh}\n深证上涨家数：${up_sz}\n深证下跌家数：${down_sz}\n北交所上涨家数：${up_bj}\n北交所下跌家数：${down_bj}\n\n合计上涨家数：${up_total}\n合计下跌家数：${down_total}\n\n📊 数据来源：${source:-未知}"
+          desp="上证上涨家数：${up_sh}\n上证下跌家数：${down_sh}\n深证上涨家数：${up_sz}\n深证下跌家数：${down_sz}\n\n合计上涨家数：${up_total}\n合计下跌家数：${down_total}\n\n📊 数据来源：${source:-未知}"
           if [ -n "$error_msg" ]; then
             title="⚠️ A股数据异常（均为0）！"
             desp="$desp\n\n⚠️ 错误信息：$error_msg"
