@@ -2,95 +2,131 @@ name: 检测A股涨跌家数并推送通知
 
 on:
   schedule:
-    # 北京时间 09:15–15:00 => UTC 01:15–07:00，每5分钟检测一次
+    # 北京时间 09:15–15:00 => UTC 01:15–07:00
     - cron: "*/5 1-7 * * 1-5"
-  workflow_dispatch:  # 允许手动运行
+  workflow_dispatch:
 
 jobs:
   check_a_shares:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 安装依赖
-        run: sudo apt-get install -y jq
+      - name: 安装 jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
 
-      - name: 检测A股涨跌家数
+      - name: 获取A股涨跌家数
         id: fetch
         run: |
-          API_URL="https://push2.eastmoney.com/api/qt/ulist.np/get?fields=f104,f105,f106,f107,f113&fltt=2&secids=1.000001"
-          DATA=$(curl -s "$API_URL" | jq '.data.diff[0]')
-          UP=$(echo "$DATA" | jq -r '.f104')
-          DOWN=$(echo "$DATA" | jq -r '.f105')
-          TOTAL=$((UP + DOWN))
-          API_DATE=$(curl -s "https://push2.eastmoney.com/api/qt/stock/get?secid=1.000001" | jq -r '.data.f57')
-          NOW_DATE=$(date +%Y%m%d)
+          url="https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&fields=f2,f3,f4,f12,f13,f14,f62,f66,f69,f72,f75,f78,f81,f84,f87,f124&secids=1.000001,0.399001,1.000300"
+          response=$(curl -s "$url")
 
-          echo "UP=$UP" >> $GITHUB_ENV
-          echo "DOWN=$DOWN" >> $GITHUB_ENV
-          echo "TOTAL=$TOTAL" >> $GITHUB_ENV
-          echo "API_DATE=$API_DATE" >> $GITHUB_ENV
-          echo "NOW_DATE=$NOW_DATE" >> $GITHUB_ENV
-
-      - name: 检查上次数据并决定是否推送
-        id: check
-        run: |
-          STATE_FILE="/tmp/last_push.json"
-          IS_MANUAL="${{ github.event_name == 'workflow_dispatch' }}"
-          
-          echo "当前运行模式: $IS_MANUAL"
-
-          # 如果API日期和本地日期不同（休市），则退出（除非手动运行）
-          if [ "$API_DATE" != "$NOW_DATE" ] && [ "$IS_MANUAL" != "true" ]; then
-            echo "⚪ 非交易日，跳过推送"
-            echo "should_push=false" >> $GITHUB_ENV
+          if [ -z "$response" ]; then
+            echo "error_msg=请求失败" >> $GITHUB_ENV
             exit 0
           fi
 
-          # 如果是新的一天，重置状态文件
-          if [ -f "$STATE_FILE" ]; then
-            LAST_DATE=$(jq -r '.date' "$STATE_FILE")
-            if [ "$LAST_DATE" != "$NOW_DATE" ]; then
-              echo "{}" > "$STATE_FILE"
+          up_total=$(echo "$response" | jq '.data.diff[0].f66')
+          down_total=$(echo "$response" | jq '.data.diff[0].f69')
+          api_date=$(echo "$response" | jq -r '.data.diff[0].f124')
+
+          if [ "$up_total" = "0" ] && [ "$down_total" = "0" ]; then
+            echo "error_msg=数据为0，可能接口异常" >> $GITHUB_ENV
+          fi
+
+          echo "up_total=$up_total" >> $GITHUB_ENV
+          echo "down_total=$down_total" >> $GITHUB_ENV
+          echo "api_date=$api_date" >> $GITHUB_ENV
+
+      - name: 判断并推送
+        run: |
+          up_total=${{ env.up_total }}
+          down_total=${{ env.down_total }}
+          api_date=${{ env.api_date }}
+          error_msg="${{ env.error_msg }}"
+
+          mkdir -p data
+          today=$(date +%Y-%m-%d)
+          state_file="data/last_push.json"
+
+          echo "本地日期：$today"
+          echo "API 日期：$api_date"
+
+          # 如果API日期和本地日期不一致，说明休市，不推送
+          if [ "$api_date" != "$today" ]; then
+            echo "检测到API日期与本地日期不符（可能休市），跳过推送。"
+            exit 0
+          fi
+
+          # 初始化或读取上次推送数据
+          if [ -f "$state_file" ]; then
+            last_date=$(jq -r '.date' "$state_file")
+            last_up=$(jq -r '.up' "$state_file")
+            last_down=$(jq -r '.down' "$state_file")
+
+            # 如果是新的一天，则清空记录
+            if [ "$last_date" != "$today" ]; then
+              echo "{\"date\": \"$today\", \"up\": 0, \"down\": 0}" > "$state_file"
+              last_up=0
+              last_down=0
+            fi
+          else
+            echo "{\"date\": \"$today\", \"up\": 0, \"down\": 0}" > "$state_file"
+            last_up=0
+            last_down=0
+          fi
+
+          up_diff=$((up_total - last_up))
+          down_diff=$((down_total - last_down))
+          up_diff_abs=${up_diff#-}
+          down_diff_abs=${down_diff#-}
+
+          echo "上次推送：上涨=${last_up} 下跌=${last_down}"
+          echo "本次检测：上涨=${up_total} 下跌=${down_total}"
+          echo "变化：上涨Δ=${up_diff} 下跌Δ=${down_diff}"
+
+          # 如果两个变化都 ≤ 500，则退出
+          if [ "$up_diff_abs" -le 500 ] && [ "$down_diff_abs" -le 500 ]; then
+            echo "变化不超过500，无需推送。"
+            exit 0
+          fi
+
+          # 向下取整到100倍数
+          up_floor=$((up_total / 100 * 100))
+          down_floor=$((down_total / 100 * 100))
+          total=$((up_total + down_total))
+
+          desp="上涨家数：${up_total}  
+          下跌家数：${down_total}  
+          总体家数：${total}"
+
+          if [ -n "$error_msg" ]; then
+            title="⚠️ A股数据异常！"
+            desp="$desp\n\n⚠️ 错误信息：$error_msg"
+          else
+            if [ "$up_total" -gt 3000 ]; then
+              title="📈 上涨家数超过${up_floor}家！"
+            elif [ "$down_total" -gt 3000 ]; then
+              title="📉 下跌家数超过${down_floor}家！"
+            else
+              echo "涨跌家数均未超过3000，无需推送。"
+              exit 0
             fi
           fi
 
-          # 如果没有历史记录，则直接推送
-          if [ ! -f "$STATE_FILE" ] || [ "$(jq -r '.up' "$STATE_FILE" 2>/dev/null)" == "null" ]; then
-            echo "{\"up\":$UP,\"down\":$DOWN,\"date\":\"$NOW_DATE\"}" > "$STATE_FILE"
-            echo "should_push=true" >> $GITHUB_ENV
-            exit 0
-          fi
+          echo "发送推送：$title"
 
-          LAST_UP=$(jq -r '.up' "$STATE_FILE")
-          LAST_DOWN=$(jq -r '.down' "$STATE_FILE")
+          curl -G "https://12404.push.ft07.com/send/${{ secrets.SERVERCHAN_KEY }}.send" \
+            --data-urlencode "title=$title" \
+            --data-urlencode "desp=$desp"
 
-          DIFF_UP=$((UP - LAST_UP))
-          DIFF_DOWN=$((DOWN - LAST_DOWN))
-          ABS_UP=${DIFF_UP#-}
-          ABS_DOWN=${DIFF_DOWN#-}
+          # 更新推送记录
+          echo "{\"date\": \"$today\", \"up\": $up_total, \"down\": $down_total}" > "$state_file"
 
-          echo "上次上涨家数：$LAST_UP"
-          echo "上次下跌家数：$LAST_DOWN"
-          echo "变化：上涨=$DIFF_UP 下跌=$DIFF_DOWN"
-
-          # 如果两个变化都 ≤ 500 且不是手动运行，则不推送
-          if [ "$ABS_UP" -le 500 ] && [ "$ABS_DOWN" -le 500 ] && [ "$IS_MANUAL" != "true" ]; then
-            echo "变化不足500，跳过推送"
-            echo "should_push=false" >> $GITHUB_ENV
-            exit 0
-          fi
-
-          # 记录新状态
-          echo "{\"up\":$UP,\"down\":$DOWN,\"date\":\"$NOW_DATE\"}" > "$STATE_FILE"
-          echo "should_push=true" >> $GITHUB_ENV
-
-      - name: 推送到Server酱
-        if: env.should_push == 'true'
-        run: |
-          KEY="${{ secrets.SERVER_KEY }}"
-          TITLE="A股涨跌家数"
-          PERCENT_UP=$(awk "BEGIN {printf \"%.2f\", $UP/$TOTAL*100}")
-          PERCENT_DOWN=$(awk "BEGIN {printf \"%.2f\", $DOWN/$TOTAL*100}")
-          DESP="📈 上涨家数：${UP} (${PERCENT_UP}%)\n📉 下跌家数：${DOWN} (${PERCENT_DOWN}%)\n📊 总家数：${TOTAL}\n📅 日期：${NOW_DATE}"
-
-          curl -s "https://sc3.ft07.com/send/$KEY.send?title=${TITLE}&desp=${DESP}"
+      - name: 保存推送状态
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: last_push_data
+          path: data/last_push.json
