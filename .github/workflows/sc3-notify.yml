@@ -129,7 +129,7 @@ jobs:
             desp="$desp\n\n⚠️ 错误信息：$error_msg"
           else
             if [ "$up_total" -gt 3000 ]; then
-              title="📈 合计上涨家数超过3000家！"
+              title="📈 上涨家数超过3000家！"
             elif [ "$down_total" -gt 3000 ]; then
               title="📉 下跌家数超过3000家！"
             else
