@@ -3,8 +3,8 @@ name: 检测A股涨跌家数并推送通知
 on:
   schedule:
     # 北京时间 09:15–15:00 => UTC 01:15–07:00
-    - cron: "*/15 1-7 * * 1-5"
-  workflow_dispatch:
+    - cron: "*/5 1-7 * * 1-5"  # 每5分钟检测一次
+  workflow_dispatch:  # 手动触发
 
 jobs:
   check_a_shares:
@@ -45,11 +45,13 @@ jobs:
           down_total=${{ env.down_total }}
           api_date=${{ env.api_date }}
           error_msg="${{ env.error_msg }}"
+          event_name="${{ github.event_name }}"  # 判断是手动运行还是定时触发
 
           mkdir -p data
           today=$(date +%Y-%m-%d)
           state_file="data/last_push.json"
 
+          echo "当前触发类型：$event_name"
           echo "本地日期：$today"
           echo "API 日期：$api_date"
 
@@ -86,10 +88,16 @@ jobs:
           echo "本次检测：上涨=${up_total} 下跌=${down_total}"
           echo "变化：上涨Δ=${up_diff} 下跌Δ=${down_diff}"
 
-          # 如果两个变化都 ≤ 500，则退出
-          if [ "$up_diff_abs" -le 500 ] && [ "$down_diff_abs" -le 500 ]; then
-            echo "变化不超过500，无需推送。"
-            exit 0
+          # ------------------------------
+          # 如果不是手动触发且变化都 ≤ 500，则退出
+          # ------------------------------
+          if [ "$event_name" != "workflow_dispatch" ]; then
+            if [ "$up_diff_abs" -le 500 ] && [ "$down_diff_abs" -le 500 ]; then
+              echo "变化不超过500，无需推送。"
+              exit 0
+            fi
+          else
+            echo "手动触发，忽略差值限制，强制推送。"
           fi
 
           # 向下取整到100倍数
@@ -99,7 +107,8 @@ jobs:
 
           desp="上涨家数：${up_total}  
           下跌家数：${down_total}  
-          总体家数：${total}"
+          总体家数：${total}  
+          日期：${api_date}"
 
           if [ -n "$error_msg" ]; then
             title="⚠️ A股数据异常！"
@@ -116,7 +125,6 @@ jobs:
           fi
 
           echo "发送推送：$title"
-
           curl -G "https://12404.push.ft07.com/send/${{ secrets.SERVERCHAN_KEY }}.send" \
             --data-urlencode "title=$title" \
             --data-urlencode "desp=$desp"
