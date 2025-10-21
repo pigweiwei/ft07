@@ -2,7 +2,6 @@ name: 检测A股涨跌家数并推送通知
 
 on:
   schedule:
-    # 北京时间 09:15–15:00 => UTC 01:15–07:00
     - cron: "*/15 1-7 * * 1-5"
   workflow_dispatch:
 
@@ -20,7 +19,6 @@ jobs:
       - name: 获取涨跌家数
         id: fetch
         run: |
-          # 初始化变量
           up_sh=""  
           down_sh=""  
           up_sz=""  
@@ -31,7 +29,6 @@ jobs:
           error_msg=""
           source="未知"
 
-          # 东方财富接口
           data=$(curl -s -L -m 10 --compressed \
             -H "User-Agent: Mozilla/5.0" \
             -H "Referer: https://www.eastmoney.com" \
@@ -57,8 +54,8 @@ jobs:
             error_msg="东方财富接口失败"
           fi
 
-          # 腾讯财经接口备用
-          if [ -z "$up_total" ] || [ -z "$down_total" ] || [ "$up_total" = "0" ]; then
+          # 腾讯财经备用
+          if [ -z "$up_total" ] || [ "$up_total" = "0" ]; then
             data=$(curl -s -L -m 10 --compressed "https://qt.gtimg.cn/q=ff_zs000001,ff_zs000002")
             status_code=$(curl -s -o /dev/null -w "%{http_code}" -L "https://qt.gtimg.cn/q=ff_zs000001,ff_zs000002")
             if [ "$status_code" -eq 200 ]; then
