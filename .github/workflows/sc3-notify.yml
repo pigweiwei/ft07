@@ -1,4 +1,4 @@
-name: 同花顺市场家数推送
+name: 同花顺市场家数调试推送
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  fetch_and_push:
+  debug_push:
     runs-on: ubuntu-latest
     env:
       SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
@@ -21,13 +21,14 @@ jobs:
           pip install --upgrade pip
           pip install requests
 
-      - name: 获取同花顺 Ajax 数据并推送
+      - name: 抓取同花顺数据并调试推送
         run: |
           python - <<'EOF'
           import requests
           import os
+          import json
 
-          # TODO: 替换成你抓到的最新同花顺 Ajax JSON URL
+          # TODO: 替换为你抓到的同花顺 Ajax JSON URL
           AJAX_URL = "https://push2.eastmoney.com/api/qt/clist/get?cb=jQuery123456&pn=1&pz=50&po=1&np=1&ut=xxx&fields=f14,f3,f2,f12,f13"
 
           headers = {
@@ -37,8 +38,11 @@ jobs:
           try:
               resp = requests.get(AJAX_URL, headers=headers)
               resp.raise_for_status()
+              print("✅ 请求成功，状态码:", resp.status_code)
 
-              # 同花顺返回的 JSON 有时是 jsonp 格式，需要去掉外层函数名
+              # 打印原始返回内容，方便调试
+              print("原始返回内容前200字符:", resp.text[:200])
+
               text = resp.text
               if text.startswith("jQuery"):
                   start = text.find('(') + 1
@@ -47,10 +51,10 @@ jobs:
               else:
                   json_str = text
 
-              data = requests.utils.json.loads(json_str)
+              data = json.loads(json_str)
+              print("解析后的 JSON 前200字符:", json.dumps(data)[:200])
 
-              # 提取上涨家数和下跌家数
-              # ⚠️ 根据 JSON 实际字段修改
+              # ⚠️ 根据返回的 JSON 实际字段修改
               up_count = int(data.get("data", {}).get("upcount", 0))
               down_count = int(data.get("data", {}).get("downcount", 0))
 
@@ -60,6 +64,9 @@ jobs:
               event_name = os.environ.get('GITHUB_EVENT_NAME', '')
               force_push = event_name == 'workflow_dispatch'
 
+              print(f"event_name={event_name}, force_push={force_push}")
+
+              # 强制推送或超过阈值时推送
               if force_push or up_count > 3000 or down_count > 3000:
                   title = "🧭 同花顺市场家数监控"
                   if down_count > 3000:
@@ -71,12 +78,12 @@ jobs:
                   key = os.environ.get('SERVERCHAN_KEY', '')
                   if key:
                       push_url = f"https://12404.push.ft07.com/send/{key}.send"
-                      requests.get(push_url, params={"title": title, "desp": desp})
-                      print("🚀 推送完成")
+                      r = requests.get(push_url, params={"title": title, "desp": desp})
+                      print("🚀 推送完成，状态码:", r.status_code)
                   else:
                       print("⚠️ SERVERCHAN_KEY 未设置")
               else:
-                  print("⏸️ 当前不触发推送")
+                  print("⏸️ 当前不触发推送，因为未超过阈值且非手动触发")
 
           except Exception as e:
               print(f"❌ 抓取或推送失败: {e}")
