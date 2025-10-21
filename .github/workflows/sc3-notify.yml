@@ -11,21 +11,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 获取涨跌家数（新版接口）
+      - name: 获取涨跌家数（网易财经接口）
         id: fetch
         run: |
-          # 东方财富新接口：获取市场总览
-          data=$(curl -s "https://push2.eastmoney.com/api/qt/ulist/get?pn=1&pz=1&fs=m:1+t:2&fields=f104,f105")
+          # 网易财经 A股市场情绪接口（返回上涨家数、下跌家数等）
+          data=$(curl -s "https://api.money.126.net/data/feed/0000001,1399001,money.api?callback=a")
 
-          up=$(echo "$data" | grep -o '"f104":[0-9]*' | head -1 | cut -d':' -f2)
-          down=$(echo "$data" | grep -o '"f105":[0-9]*' | head -1 | cut -d':' -f2)
-
-          # 如果数据为空，再尝试备用接口（沪深300接口）
-          if [ -z "$up" ] || [ -z "$down" ]; then
-            data=$(curl -s "https://push2.eastmoney.com/api/qt/ulist/get?pn=1&pz=1&fs=m:0+t:6&fields=f104,f105")
-            up=$(echo "$data" | grep -o '"f104":[0-9]*' | head -1 | cut -d':' -f2)
-            down=$(echo "$data" | grep -o '"f105":[0-9]*' | head -1 | cut -d':' -f2)
-          fi
+          # 提取上涨和下跌家数
+          up=$(echo "$data" | grep -o '"up":\?[0-9]*' | head -1 | grep -o '[0-9]*')
+          down=$(echo "$data" | grep -o '"down":\?[0-9]*' | head -1 | grep -o '[0-9]*')
 
           echo "上涨家数: $up"
           echo "下跌家数: $down"
@@ -40,7 +34,7 @@ jobs:
           down=${{ env.down }}
 
           title=""
-          desp="当前上涨家数：${up}\n当前下跌家数：${down}\n\n📊 数据来源：东方财富网"
+          desp="当前上涨家数：${up}\n当前下跌家数：${down}\n\n📊 数据来源：网易财经"
 
           if [ "$up" -gt 3000 ]; then
             title="📈 上涨家数超过3000家！"
