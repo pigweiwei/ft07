@@ -127,14 +127,18 @@ jobs:
           下跌家数：${down_total}  
           总体家数：${total}"
 
+          # 计算向下取整到100的倍数
+          up_floor=$((up_total / 100 * 100))
+          down_floor=$((down_total / 100 * 100))
+
           if [ -n "$error_msg" ]; then
             title="⚠️ A股数据异常（均为0）！"
             desp="$desp\n\n⚠️ 错误信息：$error_msg"
           else
             if [ "$up_total" -gt 3000 ]; then
-              title="📈 上涨家数超过3000家！"
+              title="📈 上涨家数超过${up_floor}家！"
             elif [ "$down_total" -gt 3000 ]; then
-              title="📉 下跌家数超过3000家！"
+              title="📉 下跌家数超过${down_floor}家！"
             else
               echo "涨跌家数均未超过3000，无需推送。"
               exit 0
