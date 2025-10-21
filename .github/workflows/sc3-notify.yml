@@ -1,70 +1,48 @@
-name: 检测A股涨跌家数并推送通知
+name: 同花顺网页家数推送
 
 on:
   schedule:
-    - cron: "*/15 * * * *"  # 每15分钟执行一次
-  workflow_dispatch:        # 支持手动运行
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
 
 jobs:
-  check_a_shares:
+  ths_web_scrape:
     runs-on: ubuntu-latest
-
     steps:
-      - name: 获取涨跌家数（东方财富接口）
+      - name: 获取同花顺网页数据
         run: |
-          echo "📊 正在获取东方财富市场数据..."
+          echo "🌐 正在抓取同花顺市场总览网页..."
 
-          # 东方财富市场总览接口（包含上涨/下跌家数）
-          resp=$(curl -s "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&invt=2&pi=1&pz=1&fid=f3&fs=m:0+t:6,m:1+t:2")
+          # 设置User-Agent防止被拒
+          html=$(curl -s -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" "https://q.10jqka.com.cn/")
 
-          echo "原始返回：$resp"
+          # 打印网页前500字符检查
+          echo "${html:0:500}"
 
-          # 提取上涨家数(f128)与下跌家数(f140)
-          up_count=$(echo "$resp" | grep -o '"f128":[0-9]*' | head -n1 | awk -F: '{print $2}')
-          down_count=$(echo "$resp" | grep -o '"f140":[0-9]*' | head -n1 | awk -F: '{print $2}')
+          # 提取上涨、下跌家数 (假设网页里有类似 '上涨家数 1234' 的文本)
+          up_count=$(echo "$html" | grep -oP '上涨家数\s*\K[0-9]+')
+          down_count=$(echo "$html" | grep -oP '下跌家数\s*\K[0-9]+')
 
           up_count=${up_count:-0}
           down_count=${down_count:-0}
 
-          echo "📈 上涨家数：$up_count"
-          echo "📉 下跌家数：$down_count"
+          echo "📈 上涨家数: $up_count"
+          echo "📉 下跌家数: $down_count"
 
-          # 当前北京时间
-          hour=$(date -u +"%H")
-          weekday=$(date -u +"%u")
-          hour_cn=$(( (hour + 8) % 24 ))
-
-          # 判断是否为手动运行
+          # 推送逻辑（手动或条件触发）
+          force_push=false
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             force_push=true
-          else
-            force_push=false
           fi
 
-          # 判断是否在交易时间（周一至周五 9:15~15:00）
-          if [ "$weekday" -lt 6 ] && [ "$hour_cn" -ge 9 ] && [ "$hour_cn" -lt 15 ]; then
-            in_time=true
-          else
-            in_time=false
-          fi
+          if $force_push || [ "$up_count" -gt 3000 ] || [ "$down_count" -gt 3000 ]; then
+            title="📊 同花顺市场家数监控"
+            desp="上涨家数：$up_count\n下跌家数：$down_count"
 
-          # 判断推送条件
-          if $force_push || ([ "$in_time" = true ] && { [ "$up_count" -gt 3000 ] || [ "$down_count" -gt 3000 ]; }); then
-            if [ "$down_count" -gt 3000 ]; then
-              title="📉 下跌家数过多提醒"
-              desp="下跌家数：${down_count}\n上涨家数：${up_count}\n市场偏弱，注意风险⚠️"
-            elif [ "$up_count" -gt 3000 ]; then
-              title="📈 上涨家数过多提醒"
-              desp="上涨家数：${up_count}\n下跌家数：${down_count}\n市场情绪偏强💪"
-            else
-              title="🧭 当前市场家数（手动推送）"
-              desp="上涨家数：${up_count}\n下跌家数：${down_count}\n手动触发测试推送✅"
-            fi
-
-            echo "🚀 正在推送消息..."
+            echo "🚀 推送 Server酱..."
             curl -s "https://12404.push.ft07.com/send/${{ secrets.SERVERCHAN_KEY }}.send" \
               --data-urlencode "title=$title" \
               --data-urlencode "desp=$desp"
           else
-            echo "⏸️ 当前不在推送条件内（hour=$hour_cn weekday=$weekday force=$force_push）"
+            echo "⏸️ 当前不触发推送"
           fi
