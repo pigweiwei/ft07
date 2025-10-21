@@ -1,4 +1,4 @@
-name: 同花顺网页家数推送
+name: 同花顺市场家数推送
 
 on:
   schedule:
@@ -9,40 +9,72 @@ jobs:
   ths_web_scrape:
     runs-on: ubuntu-latest
     steps:
-      - name: 获取同花顺网页数据
+      - name: 安装 Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
         run: |
-          echo "🌐 正在抓取同花顺市场总览网页..."
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4
 
-          # 设置User-Agent防止被拒
-          html=$(curl -s -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" "https://q.10jqka.com.cn/")
+      - name: 获取同花顺网页数据并推送
+        run: |
+          python - <<'EOF'
+          import requests
+          from bs4 import BeautifulSoup
+          import os
 
-          # 打印网页前500字符检查
-          echo "${html:0:500}"
+          url = "https://q.10jqka.com.cn/"
+          headers = {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+          }
 
-          # 提取上涨、下跌家数 (假设网页里有类似 '上涨家数 1234' 的文本)
-          up_count=$(echo "$html" | grep -oP '上涨家数\s*\K[0-9]+')
-          down_count=$(echo "$html" | grep -oP '下跌家数\s*\K[0-9]+')
+          try:
+              resp = requests.get(url, headers=headers, timeout=10)
+              resp.encoding = 'gbk'  # 同花顺网页是 GBK 编码
+              html = resp.text
 
-          up_count=${up_count:-0}
-          down_count=${down_count:-0}
+              # 解析 HTML
+              soup = BeautifulSoup(html, 'html.parser')
+              text = soup.get_text()
 
-          echo "📈 上涨家数: $up_count"
-          echo "📉 下跌家数: $down_count"
+              # 提取上涨家数和下跌家数
+              import re
+              up_match = re.search(r'上涨家数\s*(\d+)', text)
+              down_match = re.search(r'下跌家数\s*(\d+)', text)
 
-          # 推送逻辑（手动或条件触发）
-          force_push=false
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            force_push=true
-          fi
+              up_count = int(up_match.group(1)) if up_match else 0
+              down_count = int(down_match.group(1)) if down_match else 0
 
-          if $force_push || [ "$up_count" -gt 3000 ] || [ "$down_count" -gt 3000 ]; then
-            title="📊 同花顺市场家数监控"
-            desp="上涨家数：$up_count\n下跌家数：$down_count"
+              print(f"📈 上涨家数: {up_count}")
+              print(f"📉 下跌家数: {down_count}")
 
-            echo "🚀 推送 Server酱..."
-            curl -s "https://12404.push.ft07.com/send/${{ secrets.SERVERCHAN_KEY }}.send" \
-              --data-urlencode "title=$title" \
-              --data-urlencode "desp=$desp"
-          else
-            echo "⏸️ 当前不触发推送"
-          fi
+              # 判断是否手动运行
+              event_name = os.environ.get('GITHUB_EVENT_NAME', '')
+              force_push = event_name == 'workflow_dispatch'
+
+              # 判断是否触发推送条件
+              if force_push or up_count > 3000 or down_count > 3000:
+                  title = "🧭 同花顺市场家数监控"
+                  if down_count > 3000:
+                      title = "📉 下跌家数过多"
+                  elif up_count > 3000:
+                      title = "📈 上涨家数过多"
+                  desp = f"上涨家数：{up_count}\n下跌家数：{down_count}"
+
+                  # 推送 Server酱
+                  key = os.environ.get('SERVERCHAN_KEY', '')
+                  if key:
+                      push_url = f"https://12404.push.ft07.com/send/{key}.send"
+                      requests.get(push_url, params={"title": title, "desp": desp})
+                      print("🚀 推送完成")
+                  else:
+                      print("⚠️ SERVERCHAN_KEY 未设置")
+              else:
+                  print("⏸️ 当前不触发推送")
+
+          except Exception as e:
+              print(f"❌ 抓取或推送失败: {e}")
+          EOF
