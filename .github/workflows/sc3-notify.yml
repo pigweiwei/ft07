@@ -117,17 +117,12 @@ jobs:
 
       - name: 判断并推送
         run: |
-          up_sh=${{ env.up_sh }}
-          down_sh=${{ env.down_sh }}
-          up_sz=${{ env.up_sz }}
-          down_sz=${{ env.down_sz }}
           up_total=${{ env.up_total }}
           down_total=${{ env.down_total }}
-          source="${{ env.source }}"
           error_msg="${{ env.error_msg }}"
 
           title=""
-          desp="上证上涨家数：${up_sh}\n上证下跌家数：${down_sh}\n深证上涨家数：${up_sz}\n深证下跌家数：${down_sz}\n\n合计上涨家数：${up_total}\n合计下跌家数：${down_total}\n\n📊 数据来源：${source:-未知}"
+          desp="上涨家数：${up_total}\n下跌家数：${down_total}"
           if [ -n "$error_msg" ]; then
             title="⚠️ A股数据异常（均为0）！"
             desp="$desp\n\n⚠️ 错误信息：$error_msg"
