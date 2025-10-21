@@ -1,60 +1,54 @@
-import requests
-import tushare as ts
-import pandas as pd  # 用于 DataFrame 处理
+name: 检测A股涨跌家数并推送通知
 
-def fetch_market_stats():
-    """
-    使用 Tushare 获取 A 股上涨和下跌家数（实时数据）。
-    返回 (rising_count, falling_count)
-    """
-    try:
-        # Tushare 基础版免费，无需 token
-        pro = ts.pro_api()  # 如果需要高级功能，可加 token='your_token'（可选）
-        
-        # 获取沪深市场指数涨跌统计（包含涨跌家数）
-        df = pro.index_dailybasic(ts_code='000001.SH', fields='trade_date,turnover_rate,pe,pb,total_share,market_cap,circ_mv')
-        # 更好：直接用市场概览（Tushare 有 daily_basic 接口，可扩展到市场统计）
-        # 实际：用 index_weight 获取权重，但为涨跌，用以下模拟（Tushare 社区有扩展）
-        
-        # 简单方式：调用新浪 API 并解析（Tushare 内部类似）
-        url = "http://hq.sinajs.cn/list=gb_idx_zs"
-        response = requests.get(url)
-        data = response.text
-        
-        # 解析示例：提取涨跌（实际需调整，根据响应）
-        # 假设响应中涨家数在特定位置，测试后：用正则提取数字
-        import re
-        rising_match = re.search(r'涨(\d+)', data)  # 假设格式有'涨XXXX'
-        falling_match = re.search(r'跌(\d+)', data)
-        rising_count = int(rising_match.group(1)) if rising_match else 0
-        falling_count = int(falling_match.group(1)) if falling_match else 0
-        
-        # 真实测试：当前非交易时间为 0；交易时返回真实值
-        return rising_count, falling_count
-    except Exception as e:
-        print(f"抓取失败: {e}")
-        return None, None
+on:
+  schedule:
+    # 北京时间 09:15–15:00 => UTC 01:15–07:00
+    - cron: "*/15 1-7 * * 1-5"
+  workflow_dispatch:
 
-# send_notification 和 main 函数不变（从之前复制）
-def send_notification(rising, falling):
-    api_url = "https://12404.push.ft07.com/send/sctp12404t9hn7aimbwueu29q2cnvxkl.send"
-    message = f"市场警报：上涨家数={rising}，下跌家数={falling}"
-    params = {'message': message}
-    try:
-        response = requests.get(api_url, params=params)
-        response.raise_for_status()
-        print(f"推送成功: {message}")
-    except Exception as e:
-        print(f"推送失败: {e}")
+jobs:
+  check_a_shares:
+    runs-on: ubuntu-latest
 
-def main():
-    rising, falling = fetch_market_stats()
-    if rising is not None and falling is not None:
-        print(f"当前：上涨={rising}，下跌={falling}")
-        if rising > 3000 or falling > 3000:
-            send_notification(rising, falling)
-    else:
-        print("数据抓取失败")
+    steps:
+      - name: 获取涨跌家数
+        id: fetch
+        run: |
+          # 使用同花顺接口获取A股市场涨跌家数
+          data=$(curl -s "http://q.10jqka.com.cn/api.php?t=index&f=updown")
 
-if __name__ == "__main__":
-    main()
+          # 提取上涨家数与下跌家数
+          up=$(echo "$data" | jq -r '.data.up')
+          down=$(echo "$data" | jq -r '.data.down')
+
+          echo "上涨家数: $up"
+          echo "下跌家数: $down"
+
+          echo "up=$up" >> $GITHUB_ENV
+          echo "down=$down" >> $GITHUB_ENV
+
+      - name: 安装 jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: 判断并推送
+        if: env.up != '' && env.down != ''
+        run: |
+          up=${{ env.up }}
+          down=${{ env.down }}
+
+          title=""
+          desp="当前上涨家数：${up}\n当前下跌家数：${down}\n\n📊 数据来源：同花顺财经"
+
+          if [ "$up" -gt 3000 ]; then
+            title="📈 上涨家数超过3000家！"
+          elif [ "$down" -gt 3000 ]; then
+            title="📉 下跌家数超过3000家！"
+          else
+            echo "涨跌家数均未超过3000，无需推送。"
+            exit 0
+          fi
+
+          echo "发送推送：$title"
+          curl -G "https://12404.push.ft07.com/send/${{ secrets.SERVERCHAN_KEY }}.send" \
+            --data-urlencode "title=$title" \
+            --data-urlencode "desp=$desp"
