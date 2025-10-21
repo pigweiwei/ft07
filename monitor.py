@@ -2,20 +2,21 @@ import requests
 
 def fetch_market_stats():
     """
-    使用 Sina Finance API 获取A股市场上涨和下跌家数。
+    使用 Tushare 获取A股市场上涨和下跌家数（通过股票数据统计）。
     返回 (rising_count, falling_count)，失败返回 (None, None)
     """
     try:
-        # Sina Finance 市场概览 API（示例，需替换为实际涨跌家数接口）
-        # 假设使用 http://vip.stock.finance.sina.com.cn/quotes_service/view/cn_pos_zs.php
-        url = "http://vip.stock.finance.sina.com.cn/quotes_service/view/cn_pos_zs.php?code=000001"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124'}
-        response = requests.get(url, headers=headers)
-        data = response.json()
-        
-        # 提取上涨和下跌家数（根据实际 JSON 结构调整）
-        rising_count = int(data['result'][0]['data']['up_count'])
-        falling_count = int(data['result'][0]['data']['down_count'])
+        # 动态导入 Tushare（无需 token，免费版）
+        import tushare as ts
+        # 获取当天所有股票的日线数据
+        df = ts.get_day_all()
+        if df is None or df.empty:
+            print("Tushare 返回空数据，可能非交易时间")
+            return None, None
+        # 计算上涨（pct_change > 0）和下跌（pct_change < 0）家数
+        rising_count = len(df[df['changepercent'] > 0])
+        falling_count = len(df[df['changepercent'] < 0])
+        print(f"原始数据行数: {len(df)}")  # 调试
         return rising_count, falling_count
     except Exception as e:
         print(f"抓取失败: {e}")
