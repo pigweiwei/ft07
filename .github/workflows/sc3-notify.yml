@@ -21,10 +21,6 @@ jobs:
         id: fetch
         run: |
           # 初始化变量
-          up_sh=""  # 上证上涨
-          down_sh=""  # 上证下跌
-          up_sz=""  # 深证上涨
-          down_sz=""  # 深证下跌
           up_total=""  # 合计上涨
           down_total=""  # 合计下跌
           data=""
@@ -51,7 +47,7 @@ jobs:
             up_sz=$(echo "$data" | jq -r '.data.diff[1].f104 // ""')
             down_sz=$(echo "$data" | jq -r '.data.diff[1].f105 // ""')
             if [ -n "$up_sh" ] && [ -n "$down_sh" ] && [ -n "$up_sz" ] && [ -n "$down_sz" ] && [ "$up_sh" != "0" ] && [ "$down_sh" != "0" ]; then
-              source="东方财富（上证+深证成指）"
+              source="东方财富"
               # 计算合计
               up_total=$((up_sh + up_sz))
               down_total=$((down_sh + down_sz))
@@ -81,7 +77,7 @@ jobs:
               up_sz=$(echo "$data" | grep 'v_ff_zs000002="' | grep -o '上涨[0-9]*家' | grep -o '[0-9]*' || echo "")
               down_sz=$(echo "$data" | grep 'v_ff_zs000002="' | grep -o '下跌[0-9]*家' | grep -o '[0-9]*' || echo "")
               if [ -n "$up_sh" ] && [ -n "$down_sh" ] && [ -n "$up_sz" ] && [ -n "$down_sz" ]; then
-                source="腾讯财经（上证+深证）"
+                source="腾讯财经"
                 up_total=$((up_sh + up_sz))
                 down_total=$((down_sh + down_sz))
               else
@@ -97,37 +93,25 @@ jobs:
             error_msg="数据提取失败或非交易时间（当前: $(date)）。$error_msg"
             echo "警告：$error_msg"
             echo "error_msg=$error_msg" >> $GITHUB_ENV
-            up_sh=0
-            down_sh=0
-            up_sz=0
-            down_sz=0
             up_total=0
             down_total=0
           else
-            echo "成功获取！上证上涨: $up_sh, 下跌: $down_sh; 深证上涨: $up_sz, 下跌: $down_sz; 合计上涨: $up_total, 下跌: $down_total (来源: $source)"
+            echo "成功获取！合计上涨: $up_total, 下跌: $down_total (来源: $source)"
           fi
 
-          echo "up_sh=$up_sh" >> $GITHUB_ENV
-          echo "down_sh=$down_sh" >> $GITHUB_ENV
-          echo "up_sz=$up_sz" >> $GITHUB_ENV
-          echo "down_sz=$down_sz" >> $GITHUB_ENV
           echo "up_total=$up_total" >> $GITHUB_ENV
           echo "down_total=$down_total" >> $GITHUB_ENV
           echo "source=$source" >> $GITHUB_ENV
 
       - name: 判断并推送
         run: |
-          up_sh=${{ env.up_sh }}
-          down_sh=${{ env.down_sh }}
-          up_sz=${{ env.up_sz }}
-          down_sz=${{ env.down_sz }}
           up_total=${{ env.up_total }}
           down_total=${{ env.down_total }}
           source="${{ env.source }}"
           error_msg="${{ env.error_msg }}"
 
           title=""
-          desp="上证上涨家数：${up_sh}\n上证下跌家数：${down_sh}\n深证上涨家数：${up_sz}\n深证下跌家数：${down_sz}\n\n合计上涨家数：${up_total}\n合计下跌家数：${down_total}\n\n📊 数据来源：${source:-未知}"
+          desp="合计上涨家数：${up_total}\n合计下跌家数：${down_total}\n\n📊 数据来源：${source:-未知}"
           if [ -n "$error_msg" ]; then
             title="⚠️ A股数据异常（均为0）！"
             desp="$desp\n\n⚠️ 错误信息：$error_msg"
