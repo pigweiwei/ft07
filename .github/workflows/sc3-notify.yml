@@ -21,13 +21,17 @@ jobs:
         id: fetch
         run: |
           # 初始化变量
-          up=""
-          down=""
+          up_sh=""  # 上证上涨
+          down_sh=""  # 上证下跌
+          up_sz=""  # 深证上涨
+          down_sz=""  # 深证下跌
+          up_total=""  # 合计上涨
+          down_total=""  # 合计下跌
           data=""
           error_msg=""
           source="未知"
 
-          # 主接口：东方财富（跟随重定向，增强请求头）
+          # 主接口：东方财富（上证+深证）
           echo "尝试东方财富接口..."
           data=$(curl -s -L -m 10 --compressed \
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
@@ -41,101 +45,99 @@ jobs:
           echo "东方财富接口响应预览: $(echo "$data" | head -c 1000)..."
 
           if [ "$status_code" -eq 200 ] && [ -n "$data" ] && echo "$data" | jq . >/dev/null 2>&1; then
-            up=$(echo "$data" | jq -r '.data.diff[0].f104 // ""')
-            down=$(echo "$data" | jq -r '.data.diff[0].f105 // ""')
-            if [ -n "$up" ] && [ -n "$down" ] && [ "$up" != "0" ] && [ "$down" != "0" ]; then
-              source="东方财富（上证综合）"
+            # 提取上证 (1.000001) 和深证成指 (0.399001)
+            up_sh=$(echo "$data" | jq -r '.data.diff[0].f104 // ""')
+            down_sh=$(echo "$data" | jq -r '.data.diff[0].f105 // ""')
+            up_sz=$(echo "$data" | jq -r '.data.diff[1].f104 // ""')
+            down_sz=$(echo "$data" | jq -r '.data.diff[1].f105 // ""')
+            if [ -n "$up_sh" ] && [ -n "$down_sh" ] && [ -n "$up_sz" ] && [ -n "$down_sz" ] && [ "$up_sh" != "0" ] && [ "$down_sh" != "0" ]; then
+              source="东方财富（上证+深证成指）"
+              # 计算合计
+              up_total=$((up_sh + up_sz))
+              down_total=$((down_sh + down_sz))
             else
-              error_msg="东方财富数据为空或0 (up=$up, down=$down)"
+              error_msg="东方财富数据无效 (上证: up=$up_sh, down=$down_sh; 深证: up=$up_sz, down=$down_sz)"
             fi
           else
             error_msg="东方财富接口失败 (状态码: $status_code, 响应预览: $(echo "$data" | head -c 100))."
           fi
 
           # 如果东方财富失败或数据无效，尝试腾讯财经
-          if [ -z "$up" ] || [ -z "$down" ] || [ "$up" = "0" ] || [ "$down" = "0" ]; then
+          if [ -z "$up_total" ] || [ -z "$down_total" ] || [ "$up_total" = "0" ] || [ "$down_total" = "0" ]; then
             echo "东方财富失败或无效，尝试腾讯财经接口..."
             data=$(curl -s -L -m 10 --compressed \
               -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
-              "https://qt.gtimg.cn/q=ff_zs000001")
+              "https://qt.gtimg.cn/q=ff_zs000001,ff_zs000002")
             status_code=$(curl -s -o /dev/null -w "%{http_code}" -L --compressed \
               -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
-              "https://qt.gtimg.cn/q=ff_zs000001")
+              "https://qt.gtimg.cn/q=ff_zs000001,ff_zs000002")
             echo "腾讯财经接口状态码: $status_code"
             echo "腾讯财经接口响应预览: $(echo "$data" | head -c 1000)..."
 
             if [ "$status_code" -eq 200 ] && [ -n "$data" ]; then
-              up=$(echo "$data" | grep -o '上涨[0-9]*家' | grep -o '[0-9]*' || echo "")
-              down=$(echo "$data" | grep -o '下跌[0-9]*家' | grep -o '[0-9]*' || echo "")
-              if [ -n "$up" ] && [ -n "$down" ]; then
-                source="腾讯财经（上证）"
+              # 提取上证 (zs000001) 和深证 (zs000002)
+              up_sh=$(echo "$data" | grep 'v_ff_zs000001="' | grep -o '上涨[0-9]*家' | grep -o '[0-9]*' || echo "")
+              down_sh=$(echo "$data" | grep 'v_ff_zs000001="' | grep -o '下跌[0-9]*家' | grep -o '[0-9]*' || echo "")
+              up_sz=$(echo "$data" | grep 'v_ff_zs000002="' | grep -o '上涨[0-9]*家' | grep -o '[0-9]*' || echo "")
+              down_sz=$(echo "$data" | grep 'v_ff_zs000002="' | grep -o '下跌[0-9]*家' | grep -o '[0-9]*' || echo "")
+              if [ -n "$up_sh" ] && [ -n "$down_sh" ] && [ -n "$up_sz" ] && [ -n "$down_sz" ]; then
+                source="腾讯财经（上证+深证）"
+                up_total=$((up_sh + up_sz))
+                down_total=$((down_sh + down_sz))
               else
-                error_msg="$error_msg 腾讯财经提取失败 (up=$up, down=$down)."
+                error_msg="$error_msg 腾讯财经提取失败 (上证: up=$up_sh, down=$down_sh; 深证: up=$up_sz, down=$down_sz)."
               fi
             else
               error_msg="$error_msg 腾讯财经接口失败 (状态码: $status_code)."
             fi
           fi
 
-          # 如果腾讯也失败，尝试新浪财经
-          if [ -z "$up" ] || [ -z "$down" ] || [ "$up" = "0" ] || [ "$down" = "0" ]; then
-            echo "腾讯财经失败或无效，尝试新浪财经接口..."
-            data=$(curl -s -L -m 10 --compressed \
-              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
-              "http://hq.sinajs.cn/list=market_stat")
-            status_code=$(curl -s -o /dev/null -w "%{http_code}" -L --compressed \
-              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
-              "http://hq.sinajs.cn/list=market_stat")
-            echo "新浪财经接口状态码: $status_code"
-            echo "新浪财经接口响应预览: $(echo "$data" | head -c 1000)..."
-
-            if [ "$status_code" -eq 200 ] && [ -n "$data" ]; then
-              up=$(echo "$data" | grep -o 'up:[0-9]*' | cut -d':' -f2 || echo "")
-              down=$(echo "$data" | grep -o 'down:[0-9]*' | cut -d':' -f2 || echo "")
-              if [ -n "$up" ] && [ -n "$down" ]; then
-                source="新浪财经（市场统计）"
-              else
-                error_msg="$error_msg 新浪财经提取失败 (up=$up, down=$down)."
-              fi
-            else
-              error_msg="$error_msg 新浪财经接口失败 (状态码: $status_code)."
-            fi
-          fi
-
           # 检查最终结果
-          if [ -z "$up" ] || [ -z "$down" ] || [ "$up" = "0" ] || [ "$down" = "0" ]; then
+          if [ -z "$up_total" ] || [ -z "$down_total" ] || [ "$up_total" = "0" ] || [ "$down_total" = "0" ]; then
             error_msg="数据提取失败或非交易时间（当前: $(date)）。$error_msg"
             echo "警告：$error_msg"
             echo "error_msg=$error_msg" >> $GITHUB_ENV
-            up=0
-            down=0
+            up_sh=0
+            down_sh=0
+            up_sz=0
+            down_sz=0
+            up_total=0
+            down_total=0
           else
-            echo "成功获取！上涨家数: $up, 下跌家数: $down (来源: $source)"
+            echo "成功获取！上证上涨: $up_sh, 下跌: $down_sh; 深证上涨: $up_sz, 下跌: $down_sz; 合计上涨: $up_total, 下跌: $down_total (来源: $source)"
           fi
 
-          echo "up=$up" >> $GITHUB_ENV
-          echo "down=$down" >> $GITHUB_ENV
+          echo "up_sh=$up_sh" >> $GITHUB_ENV
+          echo "down_sh=$down_sh" >> $GITHUB_ENV
+          echo "up_sz=$up_sz" >> $GITHUB_ENV
+          echo "down_sz=$down_sz" >> $GITHUB_ENV
+          echo "up_total=$up_total" >> $GITHUB_ENV
+          echo "down_total=$down_total" >> $GITHUB_ENV
           echo "source=$source" >> $GITHUB_ENV
 
       - name: 判断并推送
         run: |
-          up=${{ env.up }}
-          down=${{ env.down }}
+          up_sh=${{ env.up_sh }}
+          down_sh=${{ env.down_sh }}
+          up_sz=${{ env.up_sz }}
+          down_sz=${{ env.down_sz }}
+          up_total=${{ env.up_total }}
+          down_total=${{ env.down_total }}
           source="${{ env.source }}"
           error_msg="${{ env.error_msg }}"
 
           title=""
-          desp="当前上涨家数：${up}\n当前下跌家数：${down}\n\n📊 数据来源：${source:-未知}"
+          desp="上证上涨家数：${up_sh}\n上证下跌家数：${down_sh}\n深证上涨家数：${up_sz}\n深证下跌家数：${down_sz}\n\n合计上涨家数：${up_total}\n合计下跌家数：${down_total}\n\n📊 数据来源：${source:-未知}"
           if [ -n "$error_msg" ]; then
             title="⚠️ A股数据异常（均为0）！"
             desp="$desp\n\n⚠️ 错误信息：$error_msg"
           else
-            if [ "$up" -gt 3000 ]; then
-              title="📈 上涨家数超过3000家！"
-            elif [ "$down" -gt 3000 ]; then
-              title="📉 下跌家数超过3000家！"
+            if [ "$up_total" -gt 3000 ]; then
+              title="📈 合计上涨家数超过3000家！"
+            elif [ "$down_total" -gt 3000 ]; then
+              title="📉 合计下跌家数超过3000家！"
             else
-              echo "涨跌家数均未超过3000，无需推送。"
+              echo "合计涨跌家数均未超过3000，无需推送。"
               exit 0
             fi
           fi
