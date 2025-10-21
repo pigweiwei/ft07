@@ -19,63 +19,33 @@ jobs:
       - name: 安装依赖
         run: |
           pip install --upgrade pip
-          pip install requests beautifulsoup4
+          pip install requests
 
       - name: 获取同花顺网页数据并推送
         run: |
           python - <<'EOF'
           import requests
-          from bs4 import BeautifulSoup
           import os
 
-          # 同花顺市场总览页面 URL
-          url = "https://q.10jqka.com.cn/gn/"
+          url = 'https://q.10jqka.com.cn/gn/'
+          response = requests.get(url)
+          data = response.json()
 
-          headers = {
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-          }
+          up_count = data.get('RISECOUNT', 0)
+          down_count = data.get('FALLCOUNT', 0)
 
-          try:
-              # 获取网页内容
-              response = requests.get(url, headers=headers)
-              response.raise_for_status()
+          print(f"上涨家数: {up_count}")
+          print(f"下跌家数: {down_count}")
 
-              # 使用 BeautifulSoup 解析网页
-              soup = BeautifulSoup(response.text, 'html.parser')
+          if up_count > 3000 or down_count > 3000:
+              title = "市场家数预警"
+              desp = f"上涨家数：{up_count}\n下跌家数：{down_count}"
 
-              # 查找包含上涨家数和下跌家数的元素
-              rise_count_element = soup.find('span', {'id': 'RISECOUNT'})
-              fall_count_element = soup.find('span', {'id': 'FALLCOUNT'})
-
-              # 提取上涨家数和下跌家数
-              up_count = int(rise_count_element.text.strip()) if rise_count_element else 0
-              down_count = int(fall_count_element.text.strip()) if fall_count_element else 0
-
-              print(f"📈 上涨家数: {up_count}")
-              print(f"📉 下跌家数: {down_count}")
-
-              # 判断是否需要推送
-              event_name = os.environ.get('GITHUB_EVENT_NAME', '')
-              force_push = event_name == 'workflow_dispatch'
-
-              if force_push or up_count > 3000 or down_count > 3000:
-                  title = "🧭 同花顺市场家数监控"
-                  if down_count > 3000:
-                      title = "📉 下跌家数过多"
-                  elif up_count > 3000:
-                      title = "📈 上涨家数过多"
-                  desp = f"上涨家数：{up_count}\n下跌家数：{down_count}"
-
-                  key = os.environ.get('SERVERCHAN_KEY', '')
-                  if key:
-                      push_url = f"https://12404.push.ft07.com/send/{key}.send"
-                      requests.get(push_url, params={"title": title, "desp": desp})
-                      print("🚀 推送完成")
-                  else:
-                      print("⚠️ SERVERCHAN_KEY 未设置")
+              key = os.environ.get('SERVERCHAN_KEY', '')
+              if key:
+                  push_url = f"https://sc.ftqq.com/{key}.send"
+                  requests.get(push_url, params={"text": title, "desp": desp})
+                  print("推送完成")
               else:
-                  print("⏸️ 当前不触发推送")
-
-          except Exception as e:
-              print(f"❌ 抓取或推送失败: {e}")
+                  print("SERVERCHAN_KEY 未设置")
           EOF
