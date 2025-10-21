@@ -14,43 +14,41 @@ jobs:
         run: |
           echo "📊 正在获取东方财富市场数据..."
 
-          # 获取东方财富A股总体行情
-          resp=$(curl -s "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&invt=2&pi=1&pz=1&fid=f3&fs=m:1+t:2,m:0+t:6&fields=f104,f105" | iconv -f gbk -t utf-8)
+          # 东方财富市场总览接口（包含上涨/下跌家数）
+          resp=$(curl -s "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&invt=2&pi=1&pz=1&fid=f3&fs=m:0+t:6,m:1+t:2")
+
           echo "原始返回：$resp"
 
-          # 提取上涨家数和下跌家数
-          up_count=$(echo "$resp" | grep -o '"f104":[0-9]*' | head -n1 | awk -F: '{print $2}')
-          down_count=$(echo "$resp" | grep -o '"f105":[0-9]*' | head -n1 | awk -F: '{print $2}')
+          # 提取上涨家数(f128)与下跌家数(f140)
+          up_count=$(echo "$resp" | grep -o '"f128":[0-9]*' | head -n1 | awk -F: '{print $2}')
+          down_count=$(echo "$resp" | grep -o '"f140":[0-9]*' | head -n1 | awk -F: '{print $2}')
 
-          # 防止为空的情况
           up_count=${up_count:-0}
           down_count=${down_count:-0}
 
-          echo "上涨家数：$up_count"
-          echo "下跌家数：$down_count"
+          echo "📈 上涨家数：$up_count"
+          echo "📉 下跌家数：$down_count"
 
-          # 当前时间（东八区）
+          # 当前北京时间
           hour=$(date -u +"%H")
-          minute=$(date -u +"%M")
           weekday=$(date -u +"%u")
           hour_cn=$(( (hour + 8) % 24 ))
 
           # 判断是否为手动运行
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "🟢 手动运行，强制推送一次"
             force_push=true
           else
             force_push=false
           fi
 
-          # 判断是否在交易时间（周一到周五，9:15~15:00）
+          # 判断是否在交易时间（周一至周五 9:15~15:00）
           if [ "$weekday" -lt 6 ] && [ "$hour_cn" -ge 9 ] && [ "$hour_cn" -lt 15 ]; then
             in_time=true
           else
             in_time=false
           fi
 
-          # 判断是否触发推送条件
+          # 判断推送条件
           if $force_push || ([ "$in_time" = true ] && { [ "$up_count" -gt 3000 ] || [ "$down_count" -gt 3000 ]; }); then
             if [ "$down_count" -gt 3000 ]; then
               title="📉 下跌家数过多提醒"
@@ -63,10 +61,10 @@ jobs:
               desp="上涨家数：${up_count}\n下跌家数：${down_count}\n手动触发测试推送✅"
             fi
 
-            echo "🚀 正在推送 Server酱 消息..."
+            echo "🚀 正在推送消息..."
             curl -s "https://12404.push.ft07.com/send/${{ secrets.SERVERCHAN_KEY }}.send" \
               --data-urlencode "title=$title" \
               --data-urlencode "desp=$desp"
           else
-            echo "⏸️ 当前不在推送条件内（$hour_cn 点，weekday=$weekday，force=$force_push）"
+            echo "⏸️ 当前不在推送条件内（hour=$hour_cn weekday=$weekday force=$force_push）"
           fi
