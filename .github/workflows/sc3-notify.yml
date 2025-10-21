@@ -27,44 +27,88 @@ jobs:
           error_msg=""
           source="未知"
 
-          # 主接口：东方财富（免费实时 JSON）
+          # 主接口：东方财富（跟随重定向，增强请求头）
           echo "尝试东方财富接口..."
-          data=$(curl -s -m 10 --compressed -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=1.000001,0.399001,0.399006&fields=f62,f104,f105")
-          status_code=$(curl -s -o /dev/null -w "%{http_code}" --compressed -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=1.000001,0.399001,0.399006&fields=f62,f104,f105")
+          data=$(curl -s -L -m 10 --compressed \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
+            -H "Referer: https://www.eastmoney.com" \
+            "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=1.000001,0.399001,0.399006&fields=f62,f104,f105")
+          status_code=$(curl -s -o /dev/null -w "%{http_code}" -L --compressed \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
+            -H "Referer: https://www.eastmoney.com" \
+            "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=1.000001,0.399001,0.399006&fields=f62,f104,f105")
           echo "东方财富接口状态码: $status_code"
-          echo "东方财富接口响应预览: $(echo "$data" | head -c 500)..."
+          echo "东方财富接口响应预览: $(echo "$data" | head -c 1000)..."
 
           if [ "$status_code" -eq 200 ] && [ -n "$data" ] && echo "$data" | jq . >/dev/null 2>&1; then
-            up=$(echo "$data" | jq -r '.data.diff[0].f104 // 0')
-            down=$(echo "$data" | jq -r '.data.diff[0].f105 // 0')
-            if [ "$up" != "0" ] || [ "$down" != "0" ]; then
+            up=$(echo "$data" | jq -r '.data.diff[0].f104 // ""')
+            down=$(echo "$data" | jq -r '.data.diff[0].f105 // ""')
+            if [ -n "$up" ] && [ -n "$down" ] && [ "$up" != "0" ] && [ "$down" != "0" ]; then
               source="东方财富（上证综合）"
+            else
+              error_msg="东方财富数据为空或0 (up=$up, down=$down)"
+            fi
+          else
+            error_msg="东方财富接口失败 (状态码: $status_code, 响应预览: $(echo "$data" | head -c 100))."
+          fi
+
+          # 如果东方财富失败或数据无效，尝试腾讯财经
+          if [ -z "$up" ] || [ -z "$down" ] || [ "$up" = "0" ] || [ "$down" = "0" ]; then
+            echo "东方财富失败或无效，尝试腾讯财经接口..."
+            data=$(curl -s -L -m 10 --compressed \
+              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
+              "https://qt.gtimg.cn/q=ff_zs000001")
+            status_code=$(curl -s -o /dev/null -w "%{http_code}" -L --compressed \
+              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
+              "https://qt.gtimg.cn/q=ff_zs000001")
+            echo "腾讯财经接口状态码: $status_code"
+            echo "腾讯财经接口响应预览: $(echo "$data" | head -c 1000)..."
+
+            if [ "$status_code" -eq 200 ] && [ -n "$data" ]; then
+              up=$(echo "$data" | grep -o '上涨[0-9]*家' | grep -o '[0-9]*' || echo "")
+              down=$(echo "$data" | grep -o '下跌[0-9]*家' | grep -o '[0-9]*' || echo "")
+              if [ -n "$up" ] && [ -n "$down" ]; then
+                source="腾讯财经（上证）"
+              else
+                error_msg="$error_msg 腾讯财经提取失败 (up=$up, down=$down)."
+              fi
+            else
+              error_msg="$error_msg 腾讯财经接口失败 (状态码: $status_code)."
             fi
           fi
 
-          # 如果东方财富失败或数据为0，尝试腾讯财经备用
-          if [ "$up" = "0" ] || [ "$down" = "0" ]; then
-            echo "东方财富数据为0或失败，尝试腾讯财经接口..."
-            data=$(curl -s -m 10 --compressed -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" "https://qt.gtimg.cn/q=ff_zs000001,ff_zs000002")
-            status_code=$(curl -s -o /dev/null -w "%{http_code}" --compressed -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" "https://qt.gtimg.cn/q=ff_zs000001,ff_zs000002")
-            echo "腾讯财经接口状态码: $status_code"
-            echo "腾讯财经接口响应预览: $(echo "$data" | head -c 500)..."
+          # 如果腾讯也失败，尝试新浪财经
+          if [ -z "$up" ] || [ -z "$down" ] || [ "$up" = "0" ] || [ "$down" = "0" ]; then
+            echo "腾讯财经失败或无效，尝试新浪财经接口..."
+            data=$(curl -s -L -m 10 --compressed \
+              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
+              "http://hq.sinajs.cn/list=market_stat")
+            status_code=$(curl -s -o /dev/null -w "%{http_code}" -L --compressed \
+              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
+              "http://hq.sinajs.cn/list=market_stat")
+            echo "新浪财经接口状态码: $status_code"
+            echo "新浪财经接口响应预览: $(echo "$data" | head -c 1000)..."
 
             if [ "$status_code" -eq 200 ] && [ -n "$data" ]; then
-              # 腾讯返回格式: v_ff_zs000001="...涨跌数:上涨X家,下跌Y家..."; 提取上涨/下跌
-              up=$(echo "$data" | grep -o '上涨[0-9]*家' | head -1 | grep -o '[0-9]*')
-              down=$(echo "$data" | grep -o '下跌[0-9]*家' | head -1 | grep -o '[0-9]*')
+              up=$(echo "$data" | grep -o 'up:[0-9]*' | cut -d':' -f2 || echo "")
+              down=$(echo "$data" | grep -o 'down:[0-9]*' | cut -d':' -f2 || echo "")
               if [ -n "$up" ] && [ -n "$down" ]; then
-                source="腾讯财经"
+                source="新浪财经（市场统计）"
+              else
+                error_msg="$error_msg 新浪财经提取失败 (up=$up, down=$down)."
               fi
+            else
+              error_msg="$error_msg 新浪财经接口失败 (状态码: $status_code)."
             fi
           fi
 
           # 检查最终结果
-          if [ "$up" = "0" ] && [ "$down" = "0" ]; then
-            error_msg="数据提取失败或非交易时间（当前: $(date)）。东方财富状态码: $status_code，响应预览: $(echo "$data" | head -c 100)。建议检查交易时段。"
+          if [ -z "$up" ] || [ -z "$down" ] || [ "$up" = "0" ] || [ "$down" = "0" ]; then
+            error_msg="数据提取失败或非交易时间（当前: $(date)）。$error_msg"
             echo "警告：$error_msg"
             echo "error_msg=$error_msg" >> $GITHUB_ENV
+            up=0
+            down=0
           else
             echo "成功获取！上涨家数: $up, 下跌家数: $down (来源: $source)"
           fi
