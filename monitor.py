@@ -2,21 +2,32 @@ import requests
 
 def fetch_market_stats():
     """
-    使用 Tushare 获取A股市场上涨和下跌家数（通过股票数据统计）。
+    使用 Sina Finance API 获取A股市场上涨和下跌家数。
     返回 (rising_count, falling_count)，失败返回 (None, None)
     """
     try:
-        # 动态导入 Tushare（无需 token，免费版）
-        import tushare as ts
-        # 获取当天所有股票的日线数据
-        df = ts.get_day_all()
-        if df is None or df.empty:
-            print("Tushare 返回空数据，可能非交易时间")
+        url = "http://hq.sinajs.cn/list=s_sh000001,s_sz399001"  # 上证+深证市场统计
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124'}
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.text
+        print(f"API 响应: {data}")  # 调试用
+
+        # 示例响应: var hq_str_s_sh000001="上证指数,3000.12,...,上涨家数:1500,下跌家数:1200";
+        parts = data.split(';')
+        rising_count = None
+        falling_count = None
+        for part in parts:
+            if '上涨家数' in part and '下跌家数' in part:
+                # 假设格式：上涨家数:XXXX,下跌家数:YYYY
+                rising_str = part.split('上涨家数:')[1].split(',')[0]
+                falling_str = part.split('下跌家数:')[1].split('"')[0]
+                rising_count = int(rising_str)
+                falling_count = int(falling_str)
+                break
+        if rising_count is None or falling_count is None:
+            print("未找到涨跌家数数据")
             return None, None
-        # 计算上涨（pct_change > 0）和下跌（pct_change < 0）家数
-        rising_count = len(df[df['changepercent'] > 0])
-        falling_count = len(df[df['changepercent'] < 0])
-        print(f"原始数据行数: {len(df)}")  # 调试
         return rising_count, falling_count
     except Exception as e:
         print(f"抓取失败: {e}")
