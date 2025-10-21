@@ -11,24 +11,49 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: 安装 jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
       - name: 获取涨跌家数
         id: fetch
         run: |
           # 使用同花顺接口获取A股市场涨跌家数
-          data=$(curl -s "http://q.10jqka.com.cn/api.php?t=index&f=updown")
+          data=$(curl -s -m 10 "http://q.10jqka.com.cn/api.php?t=index&f=updown")
+          
+          # 调试：输出原始响应
+          echo "Raw response: $data"
+          
+          # 检查是否为空
+          if [ -z "$data" ]; then
+            echo "错误：同花顺接口返回空数据，尝试备用接口（新浪财经）"
+            data=$(curl -s -m 10 "http://hq.sinajs.cn/list=sh000001")
+            # 新浪财经接口返回格式为 var hq_str_sh000001="..."，需解析
+            up=$(echo "$data" | grep -o '"[0-9]*,"' | head -1 | tr -d '",')
+            down=$(echo "$data" | grep -o '"[0-9]*,"' | tail -1 | tr -d '",')
+          else
+            # 验证是否为有效 JSON
+            if echo "$data" | jq . >/dev/null 2>&1; then
+              up=$(echo "$data" | jq -r '.data.up // 0')
+              down=$(echo "$data" | jq -r '.data.down // 0')
+            else
+              echo "错误：同花顺接口返回非 JSON 数据，尝试备用接口（新浪财经）"
+              data=$(curl -s -m 10 "http://hq.sinajs.cn/list=sh000001")
+              up=$(echo "$data" | grep -o '"[0-9]*,"' | head -1 | tr -d '",')
+              down=$(echo "$data" | grep -o '"[0-9]*,"' | tail -1 | tr -d '",')
+            fi
+          fi
 
-          # 提取上涨家数与下跌家数
-          up=$(echo "$data" | jq -r '.data.up')
-          down=$(echo "$data" | jq -r '.data.down')
+          # 检查提取结果
+          if [ -z "$up" ] || [ -z "$down" ]; then
+            echo "错误：无法提取涨跌家数，终止任务"
+            exit 1
+          fi
 
           echo "上涨家数: $up"
           echo "下跌家数: $down"
 
           echo "up=$up" >> $GITHUB_ENV
           echo "down=$down" >> $GITHUB_ENV
-
-      - name: 安装 jq
-        run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: 判断并推送
         if: env.up != '' && env.down != ''
@@ -37,7 +62,7 @@ jobs:
           down=${{ env.down }}
 
           title=""
-          desp="当前上涨家数：${up}\n当前下跌家数：${down}\n\n📊 数据来源：同花顺财经"
+          desp="当前上涨家数：${up}\n当前下跌家数：${down}\n\n📊 数据来源：同花顺或新浪财经"
 
           if [ "$up" -gt 3000 ]; then
             title="📈 上涨家数超过3000家！"
