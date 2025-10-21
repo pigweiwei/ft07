@@ -14,12 +14,13 @@ jobs:
       - name: 安装 jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: 设置当前日期（备用）
+      - name: 设置当前日期
         run: echo "CURRENT_DATE=$(date +%Y-%m-%d)" >> $GITHUB_ENV
 
       - name: 获取涨跌家数
         id: fetch
         run: |
+          # 初始化变量
           up_sh=""  
           down_sh=""  
           up_sz=""  
@@ -30,43 +31,42 @@ jobs:
           error_msg=""
           source="未知"
 
-          echo "尝试东方财富接口..."
+          # 东方财富接口
           data=$(curl -s -L -m 10 --compressed \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
+            -H "User-Agent: Mozilla/5.0" \
             -H "Referer: https://www.eastmoney.com" \
             "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=1.000001,0.399001,0.399006&fields=f62,f104,f105")
-          status_code=$(curl -s -o /dev/null -w "%{http_code}" -L --compressed \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
+          status_code=$(curl -s -o /dev/null -w "%{http_code}" -L \
+            -H "User-Agent: Mozilla/5.0" \
             -H "Referer: https://www.eastmoney.com" \
             "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=1.000001,0.399001,0.399006&fields=f62,f104,f105")
 
-          if [ "$status_code" -eq 200 ] && [ -n "$data" ] && echo "$data" | jq . >/dev/null 2>&1; then
+          if [ "$status_code" -eq 200 ] && echo "$data" | jq . >/dev/null 2>&1; then
             up_sh=$(echo "$data" | jq -r '.data.diff[0].f104 // ""')
             down_sh=$(echo "$data" | jq -r '.data.diff[0].f105 // ""')
             up_sz=$(echo "$data" | jq -r '.data.diff[1].f104 // ""')
             down_sz=$(echo "$data" | jq -r '.data.diff[1].f105 // ""')
-            if [ -n "$up_sh" ] && [ -n "$down_sh" ] && [ -n "$up_sz" ] && [ -n "$down_sz" ] && [ "$up_sh" != "0" ] && [ "$down_sh" != "0" ]; then
+            if [ -n "$up_sh" ] && [ -n "$down_sh" ] && [ -n "$up_sz" ] && [ -n "$down_sz" ] && [ "$up_sh" != "0" ]; then
               source="东方财富（上证+深证成指）"
               up_total=$((up_sh + up_sz))
               down_total=$((down_sh + down_sz))
             else
-              error_msg="东方财富数据无效 (上证: up=$up_sh, down=$down_sh; 深证: up=$up_sz, down=$down_sz)"
+              error_msg="东方财富数据无效"
             fi
           else
-            error_msg="东方财富接口失败 (状态码: $status_code)"
+            error_msg="东方财富接口失败"
           fi
 
-          if [ -z "$up_total" ] || [ -z "$down_total" ] || [ "$up_total" = "0" ] || [ "$down_total" = "0" ]; then
-            echo "尝试腾讯财经接口..."
+          # 腾讯财经接口备用
+          if [ -z "$up_total" ] || [ -z "$down_total" ] || [ "$up_total" = "0" ]; then
             data=$(curl -s -L -m 10 --compressed "https://qt.gtimg.cn/q=ff_zs000001,ff_zs000002")
             status_code=$(curl -s -o /dev/null -w "%{http_code}" -L "https://qt.gtimg.cn/q=ff_zs000001,ff_zs000002")
-
-            if [ "$status_code" -eq 200 ] && [ -n "$data" ]; then
+            if [ "$status_code" -eq 200 ]; then
               up_sh=$(echo "$data" | grep 'v_ff_zs000001="' | grep -o '上涨[0-9]*家' | grep -o '[0-9]*' || echo "")
               down_sh=$(echo "$data" | grep 'v_ff_zs000001="' | grep -o '下跌[0-9]*家' | grep -o '[0-9]*' || echo "")
               up_sz=$(echo "$data" | grep 'v_ff_zs000002="' | grep -o '上涨[0-9]*家' | grep -o '[0-9]*' || echo "")
               down_sz=$(echo "$data" | grep 'v_ff_zs000002="' | grep -o '下跌[0-9]*家' | grep -o '[0-9]*' || echo "")
-              if [ -n "$up_sh" ] && [ -n "$down_sh" ] && [ -n "$up_sz" ] && [ -n "$down_sz" ]; then
+              if [ -n "$up_sh" ] && [ -n "$down_sh" ]; then
                 source="腾讯财经（上证+深证）"
                 up_total=$((up_sh + up_sz))
                 down_total=$((down_sh + down_sz))
@@ -78,20 +78,12 @@ jobs:
             fi
           fi
 
-          if [ -z "$up_total" ] || [ -z "$down_total" ] || [ "$up_total" = "0" ] || [ "$down_total" = "0" ]; then
-            error_msg="数据提取失败或非交易时间。$error_msg"
-            up_sh=0
-            down_sh=0
-            up_sz=0
-            down_sz=0
+          if [ -z "$up_total" ] || [ "$up_total" = "0" ]; then
+            error_msg="非交易时间或数据提取失败。$error_msg"
             up_total=0
             down_total=0
           fi
 
-          echo "up_sh=$up_sh" >> $GITHUB_ENV
-          echo "down_sh=$down_sh" >> $GITHUB_ENV
-          echo "up_sz=$up_sz" >> $GITHUB_ENV
-          echo "down_sz=$down_sz" >> $GITHUB_ENV
           echo "up_total=$up_total" >> $GITHUB_ENV
           echo "down_total=$down_total" >> $GITHUB_ENV
           echo "source=$source" >> $GITHUB_ENV
@@ -106,6 +98,7 @@ jobs:
           title=""
           desp="上涨家数：${up_total}
 下跌家数：${down_total}"
+
           if [ -n "$error_msg" ]; then
             title="⚠️ A股数据异常（均为0）！"
             desp="$desp
