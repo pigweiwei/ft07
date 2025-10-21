@@ -123,7 +123,7 @@ jobs:
 
           title=""
           total=$((up_total + down_total))
-          desp="上涨家数：${up_total}  下跌家数：${down_total}  总家数：${total}"
+          desp="上涨家数：${up_total}\n\n下跌家数：${down_total}\n\n总家数：${total}"
 
           if [ -n "$error_msg" ]; then
             title="⚠️ A股数据异常（均为0）！"
