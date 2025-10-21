@@ -12,140 +12,97 @@ jobs:
 
     steps:
       - name: 安装 jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
 
-      - name: 设置当前日期（备用）
-        run: echo "CURRENT_DATE=$(date +%Y-%m-%d)" >> $GITHUB_ENV
-
-      - name: 获取涨跌家数
+      - name: 获取A股涨跌家数
         id: fetch
         run: |
-          # 初始化变量
-          up_sh=""  # 上证上涨
-          down_sh=""  # 上证下跌
-          up_sz=""  # 深证上涨
-          down_sz=""  # 深证下跌
-          up_total=""  # 合计上涨
-          down_total=""  # 合计下跌
-          data=""
-          error_msg=""
-          source="未知"
+          url="https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&fields=f2,f3,f4,f12,f13,f14,f62,f66,f69,f72,f75,f78,f81,f84,f87,f124&secids=1.000001,0.399001,1.000300"
+          response=$(curl -s "$url")
 
-          # 主接口：东方财富（上证+深证）
-          echo "尝试东方财富接口..."
-          data=$(curl -s -L -m 10 --compressed \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
-            -H "Referer: https://www.eastmoney.com" \
-            "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=1.000001,0.399001,0.399006&fields=f62,f104,f105")
-          status_code=$(curl -s -o /dev/null -w "%{http_code}" -L --compressed \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
-            -H "Referer: https://www.eastmoney.com" \
-            "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=1.000001,0.399001,0.399006&fields=f62,f104,f105")
-          echo "东方财富接口状态码: $status_code"
-          echo "东方财富接口响应预览: $(echo "$data" | head -c 1000)..."
-
-          if [ "$status_code" -eq 200 ] && [ -n "$data" ] && echo "$data" | jq . >/dev/null 2>&1; then
-            up_sh=$(echo "$data" | jq -r '.data.diff[0].f104 // ""')
-            down_sh=$(echo "$data" | jq -r '.data.diff[0].f105 // ""')
-            up_sz=$(echo "$data" | jq -r '.data.diff[1].f104 // ""')
-            down_sz=$(echo "$data" | jq -r '.data.diff[1].f105 // ""')
-            if [ -n "$up_sh" ] && [ -n "$down_sh" ] && [ -n "$up_sz" ] && [ -n "$down_sz" ] && [ "$up_sh" != "0" ] && [ "$down_sh" != "0" ]; then
-              source="东方财富（上证+深证成指）"
-              up_total=$((up_sh + up_sz))
-              down_total=$((down_sh + down_sz))
-            else
-              error_msg="东方财富数据无效 (上证: up=$up_sh, down=$down_sh; 深证: up=$up_sz, down=$down_sz)"
-            fi
-          else
-            error_msg="东方财富接口失败 (状态码: $status_code, 响应预览: $(echo "$data" | head -c 100))."
+          if [ -z "$response" ]; then
+            echo "error_msg=请求失败" >> $GITHUB_ENV
+            exit 0
           fi
 
-          # 腾讯财经备用接口
-          if [ -z "$up_total" ] || [ -z "$down_total" ] || [ "$up_total" = "0" ] || [ "$down_total" = "0" ]; then
-            echo "东方财富失败或无效，尝试腾讯财经接口..."
-            data=$(curl -s -L -m 10 --compressed \
-              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
-              "https://qt.gtimg.cn/q=ff_zs000001,ff_zs000002")
-            status_code=$(curl -s -o /dev/null -w "%{http_code}" -L --compressed \
-              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
-              "https://qt.gtimg.cn/q=ff_zs000001,ff_zs000002")
-            echo "腾讯财经接口状态码: $status_code"
-            echo "腾讯财经接口响应预览: $(echo "$data" | head -c 1000)..."
+          up_total=$(echo "$response" | jq '.data.diff[0].f66')
+          down_total=$(echo "$response" | jq '.data.diff[0].f69')
+          api_date=$(echo "$response" | jq -r '.data.diff[0].f124')
 
-            if [ "$status_code" -eq 200 ] && [ -n "$data" ]; then
-              up_sh=$(echo "$data" | grep 'v_ff_zs000001="' | grep -o '上涨[0-9]*家' | grep -o '[0-9]*' || echo "")
-              down_sh=$(echo "$data" | grep 'v_ff_zs000001="' | grep -o '下跌[0-9]*家' | grep -o '[0-9]*' || echo "")
-              up_sz=$(echo "$data" | grep 'v_ff_zs000002="' | grep -o '上涨[0-9]*家' | grep -o '[0-9]*' || echo "")
-              down_sz=$(echo "$data" | grep 'v_ff_zs000002="' | grep -o '下跌[0-9]*家' | grep -o '[0-9]*' || echo "")
-              if [ -n "$up_sh" ] && [ -n "$down_sh" ] && [ -n "$up_sz" ] && [ -n "$down_sz" ]; then
-                source="腾讯财经（上证+深证）"
-                up_total=$((up_sh + up_sz))
-                down_total=$((down_sh + down_sz))
-              else
-                error_msg="$error_msg 腾讯财经提取失败 (上证: up=$up_sh, down=$down_sh; 深证: up=$up_sz, down=$down_sz)."
-              fi
-            else
-              error_msg="$error_msg 腾讯财经接口失败 (状态码: $status_code)."
-            fi
+          if [ "$up_total" = "0" ] && [ "$down_total" = "0" ]; then
+            echo "error_msg=数据为0，可能接口异常" >> $GITHUB_ENV
           fi
 
-          if [ -z "$up_total" ] || [ -z "$down_total" ] || [ "$up_total" = "0" ] || [ "$down_total" = "0" ]; then
-            error_msg="数据提取失败或非交易时间（当前: $(date)）。$error_msg"
-            echo "警告：$error_msg"
-            echo "error_msg=$error_msg" >> $GITHUB_ENV
-            up_sh=0
-            down_sh=0
-            up_sz=0
-            down_sz=0
-            up_total=0
-            down_total=0
-          else
-            echo "成功获取！上证上涨: $up_sh, 下跌: $down_sh; 深证上涨: $up_sz, 下跌: $down_sz; 合计上涨: $up_total, 下跌: $down_total (来源: $source)"
-          fi
-
-          echo "up_sh=$up_sh" >> $GITHUB_ENV
-          echo "down_sh=$down_sh" >> $GITHUB_ENV
-          echo "up_sz=$up_sz" >> $GITHUB_ENV
-          echo "down_sz=$down_sz" >> $GITHUB_ENV
           echo "up_total=$up_total" >> $GITHUB_ENV
           echo "down_total=$down_total" >> $GITHUB_ENV
-          echo "source=$source" >> $GITHUB_ENV
+          echo "api_date=$api_date" >> $GITHUB_ENV
 
       - name: 判断并推送
         run: |
           up_total=${{ env.up_total }}
           down_total=${{ env.down_total }}
+          api_date=${{ env.api_date }}
           error_msg="${{ env.error_msg }}"
 
-          # 读取上一次推送的数据
-          last_up=0
-          last_down=0
-          if [ -f ".last_push" ]; then
-            last_up=$(awk '{print $1}' .last_push)
-            last_down=$(awk '{print $2}' .last_push)
-          fi
+          mkdir -p data
+          today=$(date +%Y-%m-%d)
+          state_file="data/last_push.json"
 
-          # 判断变化是否超过阈值500
-          delta_up=$(( up_total > last_up ? up_total - last_up : last_up - up_total ))
-          delta_down=$(( down_total > last_down ? down_total - last_down : last_down - down_total ))
+          echo "本地日期：$today"
+          echo "API 日期：$api_date"
 
-          if [ "$delta_up" -le 500 ] && [ "$delta_down" -le 500 ]; then
-            echo "涨跌变化未超过500，无需推送。"
+          # 如果API日期和本地日期不一致，说明休市，不推送
+          if [ "$api_date" != "$today" ]; then
+            echo "检测到API日期与本地日期不符（可能休市），跳过推送。"
             exit 0
           fi
 
-          # 计算向下取整到100的倍数
+          # 初始化或读取上次推送数据
+          if [ -f "$state_file" ]; then
+            last_date=$(jq -r '.date' "$state_file")
+            last_up=$(jq -r '.up' "$state_file")
+            last_down=$(jq -r '.down' "$state_file")
+
+            # 如果是新的一天，则清空记录
+            if [ "$last_date" != "$today" ]; then
+              echo "{\"date\": \"$today\", \"up\": 0, \"down\": 0}" > "$state_file"
+              last_up=0
+              last_down=0
+            fi
+          else
+            echo "{\"date\": \"$today\", \"up\": 0, \"down\": 0}" > "$state_file"
+            last_up=0
+            last_down=0
+          fi
+
+          up_diff=$((up_total - last_up))
+          down_diff=$((down_total - last_down))
+          up_diff_abs=${up_diff#-}
+          down_diff_abs=${down_diff#-}
+
+          echo "上次推送：上涨=${last_up} 下跌=${last_down}"
+          echo "本次检测：上涨=${up_total} 下跌=${down_total}"
+          echo "变化：上涨Δ=${up_diff} 下跌Δ=${down_diff}"
+
+          # 如果两个变化都 ≤ 500，则退出
+          if [ "$up_diff_abs" -le 500 ] && [ "$down_diff_abs" -le 500 ]; then
+            echo "变化不超过500，无需推送。"
+            exit 0
+          fi
+
+          # 向下取整到100倍数
           up_floor=$((up_total / 100 * 100))
           down_floor=$((down_total / 100 * 100))
-
-          title=""
           total=$((up_total + down_total))
+
           desp="上涨家数：${up_total}  
           下跌家数：${down_total}  
           总体家数：${total}"
 
           if [ -n "$error_msg" ]; then
-            title="⚠️ A股数据异常（均为0）！"
+            title="⚠️ A股数据异常！"
             desp="$desp\n\n⚠️ 错误信息：$error_msg"
           else
             if [ "$up_total" -gt 3000 ]; then
@@ -159,9 +116,17 @@ jobs:
           fi
 
           echo "发送推送：$title"
+
           curl -G "https://12404.push.ft07.com/send/${{ secrets.SERVERCHAN_KEY }}.send" \
             --data-urlencode "title=$title" \
             --data-urlencode "desp=$desp"
 
-          # 保存当前数字为下一次参考
-          echo "$up_total $down_total" > .last_push
+          # 更新推送记录
+          echo "{\"date\": \"$today\", \"up\": $up_total, \"down\": $down_total}" > "$state_file"
+
+      - name: 保存推送状态
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: last_push_data
+          path: data/last_push.json
