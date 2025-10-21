@@ -1,19 +1,51 @@
-name: 测试 Server酱 推送
+name: 检测A股涨跌家数并推送通知
 
 on:
   schedule:
-    - cron: "*/90 * * * *"  # 每15分钟执行一次
-  workflow_dispatch:        # 可手动触发
+    # 每15分钟执行一次（GitHub Action 使用 UTC，需要换算为北京时间 -8 小时）
+    # 北京时间 09:15–15:00 => UTC 01:15–07:00
+    - cron: "*/15 1-7 * * 1-5"
+  workflow_dispatch:  # 手动触发
 
 jobs:
-  send_test_message:
+  check_a_shares:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 发送测试推送
+      - name: 获取涨跌家数
+        id: fetch
         run: |
-          title="这是GitHub Actions的测试消息"
-          desp="测试成功：说明你的Server酱推送API工作正常 ✅"
+          # 使用东方财富A股市场整体行情API
+          data=$(curl -s "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=1.000001,0.399001,0.399006&fields=f104,f105")
+          
+          # 东方财富接口中 f104 是上涨家数，f105 是下跌家数
+          up=$(echo $data | grep -o '"f104":[0-9]*' | grep -o '[0-9]*' | head -1)
+          down=$(echo $data | grep -o '"f105":[0-9]*' | grep -o '[0-9]*' | head -1)
+
+          echo "上涨家数: $up"
+          echo "下跌家数: $down"
+
+          # 输出变量给下一个步骤
+          echo "up=$up" >> $GITHUB_ENV
+          echo "down=$down" >> $GITHUB_ENV
+
+      - name: 判断并推送
+        if: env.up != '' && env.down != ''
+        run: |
+          up=${{ env.up }}
+          down=${{ env.down }}
+          
+          title=""
+          desp="当前上涨家数：${up}\n当前下跌家数：${down}\n\n📊 数据来源：东方财富网"
+
+          if [ "$up" -gt 3000 ]; then
+            title="📈 上涨家数超过3000家！"
+          elif [ "$down" -gt 3000 ]; then
+            title="📉 下跌家数超过3000家！"
+          else
+            echo "涨跌家数均未超过3000，无需推送。"
+            exit 0
+          fi
           
           curl -G "https://12404.push.ft07.com/send/${{ secrets.SERVERCHAN_KEY }}.send" \
             --data-urlencode "title=$title" \
