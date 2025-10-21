@@ -122,7 +122,7 @@ jobs:
           error_msg="${{ env.error_msg }}"
 
           title=""
-          desp="上涨家数：${up_total}
+          desp="上涨家数：${up_total}  
           下跌家数：${down_total}"
           if [ -n "$error_msg" ]; then
             title="⚠️ A股数据异常（均为0）！"
@@ -131,9 +131,9 @@ jobs:
             if [ "$up_total" -gt 3000 ]; then
               title="📈 合计上涨家数超过3000家！"
             elif [ "$down_total" -gt 3000 ]; then
-              title="📉 合计下跌家数超过3000家！"
+              title="📉 下跌家数超过3000家！"
             else
-              echo "合计涨跌家数均未超过3000，无需推送。"
+              echo "涨跌家数均未超过3000，无需推送。"
               exit 0
             fi
           fi
