@@ -45,14 +45,12 @@ jobs:
           echo "东方财富接口响应预览: $(echo "$data" | head -c 1000)..."
 
           if [ "$status_code" -eq 200 ] && [ -n "$data" ] && echo "$data" | jq . >/dev/null 2>&1; then
-            # 提取上证 (1.000001) 和深证成指 (0.399001)
             up_sh=$(echo "$data" | jq -r '.data.diff[0].f104 // ""')
             down_sh=$(echo "$data" | jq -r '.data.diff[0].f105 // ""')
             up_sz=$(echo "$data" | jq -r '.data.diff[1].f104 // ""')
             down_sz=$(echo "$data" | jq -r '.data.diff[1].f105 // ""')
             if [ -n "$up_sh" ] && [ -n "$down_sh" ] && [ -n "$up_sz" ] && [ -n "$down_sz" ] && [ "$up_sh" != "0" ] && [ "$down_sh" != "0" ]; then
               source="东方财富（上证+深证成指）"
-              # 计算合计
               up_total=$((up_sh + up_sz))
               down_total=$((down_sh + down_sz))
             else
@@ -62,7 +60,7 @@ jobs:
             error_msg="东方财富接口失败 (状态码: $status_code, 响应预览: $(echo "$data" | head -c 100))."
           fi
 
-          # 如果东方财富失败或数据无效，尝试腾讯财经
+          # 腾讯财经备用接口
           if [ -z "$up_total" ] || [ -z "$down_total" ] || [ "$up_total" = "0" ] || [ "$down_total" = "0" ]; then
             echo "东方财富失败或无效，尝试腾讯财经接口..."
             data=$(curl -s -L -m 10 --compressed \
@@ -75,7 +73,6 @@ jobs:
             echo "腾讯财经接口响应预览: $(echo "$data" | head -c 1000)..."
 
             if [ "$status_code" -eq 200 ] && [ -n "$data" ]; then
-              # 提取上证 (zs000001) 和深证 (zs000002)
               up_sh=$(echo "$data" | grep 'v_ff_zs000001="' | grep -o '上涨[0-9]*家' | grep -o '[0-9]*' || echo "")
               down_sh=$(echo "$data" | grep 'v_ff_zs000001="' | grep -o '下跌[0-9]*家' | grep -o '[0-9]*' || echo "")
               up_sz=$(echo "$data" | grep 'v_ff_zs000002="' | grep -o '上涨[0-9]*家' | grep -o '[0-9]*' || echo "")
@@ -92,7 +89,6 @@ jobs:
             fi
           fi
 
-          # 检查最终结果
           if [ -z "$up_total" ] || [ -z "$down_total" ] || [ "$up_total" = "0" ] || [ "$down_total" = "0" ]; then
             error_msg="数据提取失败或非交易时间（当前: $(date)）。$error_msg"
             echo "警告：$error_msg"
@@ -121,15 +117,32 @@ jobs:
           down_total=${{ env.down_total }}
           error_msg="${{ env.error_msg }}"
 
+          # 读取上一次推送的数据
+          last_up=0
+          last_down=0
+          if [ -f ".last_push" ]; then
+            last_up=$(awk '{print $1}' .last_push)
+            last_down=$(awk '{print $2}' .last_push)
+          fi
+
+          # 判断变化是否超过阈值500
+          delta_up=$(( up_total > last_up ? up_total - last_up : last_up - up_total ))
+          delta_down=$(( down_total > last_down ? down_total - last_down : last_down - down_total ))
+
+          if [ "$delta_up" -le 500 ] && [ "$delta_down" -le 500 ]; then
+            echo "涨跌变化未超过500，无需推送。"
+            exit 0
+          fi
+
+          # 计算向下取整到100的倍数
+          up_floor=$((up_total / 100 * 100))
+          down_floor=$((down_total / 100 * 100))
+
           title=""
           total=$((up_total + down_total))
           desp="上涨家数：${up_total}  
           下跌家数：${down_total}  
           总体家数：${total}"
-
-          # 计算向下取整到100的倍数
-          up_floor=$((up_total / 100 * 100))
-          down_floor=$((down_total / 100 * 100))
 
           if [ -n "$error_msg" ]; then
             title="⚠️ A股数据异常（均为0）！"
@@ -149,3 +162,6 @@ jobs:
           curl -G "https://12404.push.ft07.com/send/${{ secrets.SERVERCHAN_KEY }}.send" \
             --data-urlencode "title=$title" \
             --data-urlencode "desp=$desp"
+
+          # 保存当前数字为下一次参考
+          echo "$up_total $down_total" > .last_push
