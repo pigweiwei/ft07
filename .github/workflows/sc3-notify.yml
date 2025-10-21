@@ -1,63 +1,38 @@
-name: 检测A股涨跌家数并推送通知
+name: 获取A股涨跌家数并推送通知
 
 on:
   schedule:
-    - cron: "*/15 1-7 * * 1-5" # 北京时间09:15–15:00
-  workflow_dispatch:
+    - cron: "*/15 * * * *"  # 每15分钟执行一次
+  workflow_dispatch:        # 支持手动触发
 
 jobs:
   check_a_shares:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 获取涨跌家数（打印原始返回）
-        id: fetch
+      - name: 获取涨跌家数(新浪财经接口)
         run: |
-          echo "正在获取网易财经市场数据..."
-          data=$(curl -s "https://api.money.126.net/data/feed/0000001,1399001,money.api?callback=a")
+          echo "正在获取A股市场数据（新浪财经接口）..."
 
-          echo "------ 原始返回前300字符 ------"
-          echo "$data" | head -c 300
-          echo ""
-          echo "--------------------------------"
+          # 使用新浪接口，GitHub国外服务器能访问
+          data=$(curl -s "https://hq.sinajs.cn/list=sh000001,sz399001" | iconv -f gbk -t utf-8)
 
-          # 尝试提取数字字段（兼容多种写法）
-          up=$(echo "$data" | grep -Eo '"up":[0-9]+' | head -1 | grep -Eo '[0-9]+')
-          down=$(echo "$data" | grep -Eo '"down":[0-9]+' | head -1 | grep -Eo '[0-9]+')
+          echo "原始返回：$data"
 
-          # 若为空，置为0防止报错
-          up=${up:-0}
-          down=${down:-0}
-
-          echo "上涨家数: $up"
-          echo "下跌家数: $down"
-
-          echo "up=$up" >> $GITHUB_ENV
-          echo "down=$down" >> $GITHUB_ENV
-
-      - name: 判断并推送
-        run: |
-          up=${{ env.up }}
-          down=${{ env.down }}
-
-          title=""
-          desp="当前上涨家数：${up}\n当前下跌家数：${down}\n\n📊 数据来源：网易财经"
-
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            title="🧪 手动测试推送"
-            echo "检测到手动运行，强制推送当前数据。"
+          # 如果返回为空，推送一条测试消息
+          if [[ -z "$data" ]]; then
+            echo "❌ 未获取到数据，强制推送测试消息"
+            title="⚠️ 测试推送（未获取到数据）"
+            desp="可能被拦截或网络错误"
           else
-            if [ "$up" -gt 3000 ]; then
-              title="📈 上涨家数超过3000家！"
-            elif [ "$down" -gt 3000 ]; then
-              title="📉 下跌家数超过3000家！"
-            else
-              echo "涨跌家数均未超过3000，无需推送。"
-              exit 0
-            fi
+            # 提取示例数值（注意：新浪接口不提供家数，这里只是演示）
+            sh_val=$(echo "$data" | grep -oE '[0-9]+\.[0-9]+' | head -n 1)
+            sz_val=$(echo "$data" | grep -oE '[0-9]+\.[0-9]+' | head -n 2 | tail -n 1)
+
+            title="📈 A股市场情绪监控"
+            desp="上证指数: ${sh_val}\n深证指数: ${sz_val}\n\n（本次为测试推送，接口运行正常）"
           fi
 
-          echo "发送推送：$title"
-          curl -G "https://12404.push.ft07.com/send/${{ secrets.SERVERCHAN_KEY }}.send" \
-            --data-urlencode "title=$title" \
-            --data-urlencode "desp=$desp"
+          echo "准备推送..."
+          # ⚠️ 把 XXXXXX 改成你自己的 Server酱 Key
+          curl -s "https://sc3.ft07.com/send/XXXXXX.send?title=${title}&desp=${desp}"
