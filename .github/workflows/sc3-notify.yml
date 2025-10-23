@@ -2,150 +2,105 @@ name: 检测A股涨跌家数并推送通知
 
 on:
   schedule:
-    # 北京时间 09:15–15:00 => UTC 01:15–07:00
-    - cron: "*/5 1-7 * * 1-5"
-  workflow_dispatch:
+    # 北京时间 09:15–15:00 => UTC 01:15–07:00，每15分钟执行一次
+    - cron: "*/15 1-7 * * 1-5"
+  workflow_dispatch:  # 支持手动运行
 
 jobs:
   check_a_shares:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 安装 jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: 设置当前日期（备用）
-        run: echo "CURRENT_DATE=$(date +%Y-%m-%d)" >> $GITHUB_ENV
-
-      - name: 获取涨跌家数
-        id: fetch
+      - name: 检测A股涨跌家数并推送
+        env:
+          SCKEY: ${{ secrets.SERVERCHAN_KEY }}  # Server酱³密钥
         run: |
-          # 初始化变量
-          up_sh=""  # 上证上涨
-          down_sh=""  # 上证下跌
-          up_sz=""  # 深证上涨
-          down_sz=""  # 深证下跌
-          up_total=""  # 合计上涨
-          down_total=""  # 合计下跌
-          data=""
-          error_msg=""
-          source="未知"
+          python3 - <<'EOF'
+          import requests, datetime, sys
 
-          # 主接口：东方财富（上证+深证）
-          echo "尝试东方财富接口..."
-          data=$(curl -s -L -m 10 --compressed \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
-            -H "Referer: https://www.eastmoney.com" \
-            "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=1.000001,0.399001,0.399006&fields=f62,f104,f105")
-          status_code=$(curl -s -o /dev/null -w "%{http_code}" -L --compressed \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
-            -H "Referer: https://www.eastmoney.com" \
-            "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=1.000001,0.399001,0.399006&fields=f62,f104,f105")
-          echo "东方财富接口状态码: $status_code"
-          echo "东方财富接口响应预览: $(echo "$data" | head -c 1000)..."
+          # ========== 基础配置 ==========
+          SERVER_KEY = "${{ secrets.SERVERCHAN_KEY }}"
+          PUSH_URL = f"https://sctapi.ftqq.com/{SERVER_KEY}.send"
+          EASTMONEY_URL = "https://push2.eastmoney.com/api/qt/ulist.np/get"
+          CALENDAR_URL = "https://api.toolhub.cn/api/holiday/info"  # 免费节假日接口
 
-          if [ "$status_code" -eq 200 ] && [ -n "$data" ] && echo "$data" | jq . >/dev/null 2>&1; then
-            # 提取上证 (1.000001) 和深证成指 (0.399001)
-            up_sh=$(echo "$data" | jq -r '.data.diff[0].f104 // ""')
-            down_sh=$(echo "$data" | jq -r '.data.diff[0].f105 // ""')
-            up_sz=$(echo "$data" | jq -r '.data.diff[1].f104 // ""')
-            down_sz=$(echo "$data" | jq -r '.data.diff[1].f105 // ""')
-            if [ -n "$up_sh" ] && [ -n "$down_sh" ] && [ -n "$up_sz" ] && [ -n "$down_sz" ] && [ "$up_sh" != "0" ] && [ "$down_sh" != "0" ]; then
-              source="东方财富（上证+深证成指）"
-              # 计算合计
-              up_total=$((up_sh + up_sz))
-              down_total=$((down_sh + down_sz))
-            else
-              error_msg="东方财富数据无效 (上证: up=$up_sh, down=$down_sh; 深证: up=$up_sz, down=$down_sz)"
-            fi
-          else
-            error_msg="东方财富接口失败 (状态码: $status_code, 响应预览: $(echo "$data" | head -c 100))."
-          fi
+          # ========== 工具函数 ==========
+          def is_trading_day():
+              """检测今天是否为交易日"""
+              today = datetime.date.today().strftime("%Y-%m-%d")
+              try:
+                  r = requests.get(CALENDAR_URL, params={"date": today}, timeout=5)
+                  data = r.json()
+                  if data.get("code") == 200:
+                      if data["data"]["workday"]:
+                          return True
+                      else:
+                          print("📅 今天是假期或周末，跳过推送。")
+                          return False
+              except Exception as e:
+                  print(f"⚠️ 节假日接口异常：{e}，默认视为交易日。")
+                  return True
+              return True
 
-          # 如果东方财富失败或数据无效，尝试腾讯财经
-          if [ -z "$up_total" ] || [ -z "$down_total" ] || [ "$up_total" = "0" ] || [ "$down_total" = "0" ]; then
-            echo "东方财富失败或无效，尝试腾讯财经接口..."
-            data=$(curl -s -L -m 10 --compressed \
-              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
-              "https://qt.gtimg.cn/q=ff_zs000001,ff_zs000002")
-            status_code=$(curl -s -o /dev/null -w "%{http_code}" -L --compressed \
-              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
-              "https://qt.gtimg.cn/q=ff_zs000001,ff_zs000002")
-            echo "腾讯财经接口状态码: $status_code"
-            echo "腾讯财经接口响应预览: $(echo "$data" | head -c 1000)..."
+          def push_serverchan(title, desp):
+              """推送到 Server酱³"""
+              try:
+                  r = requests.post(PUSH_URL, data={"title": title, "desp": desp})
+                  if r.status_code == 200:
+                      print("✅ 推送成功")
+                  else:
+                      print(f"❌ 推送失败：{r.text}")
+              except Exception as e:
+                  print(f"❌ 推送异常：{e}")
 
-            if [ "$status_code" -eq 200 ] && [ -n "$data" ]; then
-              # 提取上证 (zs000001) 和深证 (zs000002)
-              up_sh=$(echo "$data" | grep 'v_ff_zs000001="' | grep -o '上涨[0-9]*家' | grep -o '[0-9]*' || echo "")
-              down_sh=$(echo "$data" | grep 'v_ff_zs000001="' | grep -o '下跌[0-9]*家' | grep -o '[0-9]*' || echo "")
-              up_sz=$(echo "$data" | grep 'v_ff_zs000002="' | grep -o '上涨[0-9]*家' | grep -o '[0-9]*' || echo "")
-              down_sz=$(echo "$data" | grep 'v_ff_zs000002="' | grep -o '下跌[0-9]*家' | grep -o '[0-9]*' || echo "")
-              if [ -n "$up_sh" ] && [ -n "$down_sh" ] && [ -n "$up_sz" ] && [ -n "$down_sz" ]; then
-                source="腾讯财经（上证+深证）"
-                up_total=$((up_sh + up_sz))
-                down_total=$((down_sh + down_sz))
-              else
-                error_msg="$error_msg 腾讯财经提取失败 (上证: up=$up_sh, down=$down_sh; 深证: up=$up_sz, down=$down_sz)."
-              fi
-            else
-              error_msg="$error_msg 腾讯财经接口失败 (状态码: $status_code)."
-            fi
-          fi
+          # ========== 主逻辑 ==========
+          now = datetime.datetime.now()
+          hour = now.hour
 
-          # 检查最终结果
-          if [ -z "$up_total" ] || [ -z "$down_total" ] || [ "$up_total" = "0" ] || [ "$down_total" = "0" ]; then
-            error_msg="数据提取失败或非交易时间（当前: $(date)）。$error_msg"
-            echo "警告：$error_msg"
-            echo "error_msg=$error_msg" >> $GITHUB_ENV
-            up_sh=0
-            down_sh=0
-            up_sz=0
-            down_sz=0
-            up_total=0
-            down_total=0
-          else
-            echo "成功获取！上证上涨: $up_sh, 下跌: $down_sh; 深证上涨: $up_sz, 下跌: $down_sz; 合计上涨: $up_total, 下跌: $down_total (来源: $source)"
-          fi
+          # 非交易时间自动退出（手动运行除外）
+          manual = "workflow_dispatch" in sys.argv
+          if not manual and (hour < 9 or hour >= 15):
+              print("⏸ 当前非交易时段，不推送。")
+              sys.exit(0)
 
-          echo "up_sh=$up_sh" >> $GITHUB_ENV
-          echo "down_sh=$down_sh" >> $GITHUB_ENV
-          echo "up_sz=$up_sz" >> $GITHUB_ENV
-          echo "down_sz=$down_sz" >> $GITHUB_ENV
-          echo "up_total=$up_total" >> $GITHUB_ENV
-          echo "down_total=$down_total" >> $GITHUB_ENV
-          echo "source=$source" >> $GITHUB_ENV
+          if not manual and not is_trading_day():
+              sys.exit(0)
 
-      - name: 判断并推送
-        run: |
-          up_total=${{ env.up_total }}
-          down_total=${{ env.down_total }}
-          error_msg="${{ env.error_msg }}"
+          print("📡 获取东方财富数据中...")
 
-          title=""
-          total=$((up_total + down_total))
-          desp="上涨家数：${up_total}  
-          下跌家数：${down_total}  
-          总体家数：${total}"
+          params = {
+              "fltt": "2",
+              "secids": "1.000001,0.399001",
+              "fields": "f104,f105"
+          }
 
-          # 计算向下取整到100的倍数
-          up_floor=$((up_total / 100 * 100))
-          down_floor=$((down_total / 100 * 100))
+          try:
+              r = requests.get(EASTMONEY_URL, params=params, timeout=10)
+              data = r.json()
+              diff = data["data"]["diff"]
+          except Exception as e:
+              print(f"❌ 获取东方财富数据失败：{e}")
+              sys.exit(1)
 
-          if [ -n "$error_msg" ]; then
-            title="⚠️ A股数据异常（均为0）！"
-            desp="$desp\n\n⚠️ 错误信息：$error_msg"
-          else
-            if [ "$up_total" -gt 3000 ]; then
-              title="📈 上涨家数超过${up_floor}家！"
-            elif [ "$down_total" -gt 3000 ]; then
-              title="📉 下跌家数超过${down_floor}家！"
-            else
-              echo "涨跌家数均未超过3000，无需推送。"
-              exit 0
-            fi
-          fi
+          try:
+              up_total = diff[0]["f104"]
+              down_total = diff[0]["f105"]
+              total = up_total + down_total
+              up_ratio = round(up_total / total * 100, 1)
+              down_ratio = round(down_total / total * 100, 1)
+          except Exception as e:
+              print(f"❌ 数据解析错误：{e}")
+              sys.exit(1)
 
-          echo "发送推送：$title"
-          curl -G "https://12404.push.ft07.com/send/${{ secrets.SERVERCHAN_KEY }}.send" \
-            --data-urlencode "title=$title" \
-            --data-urlencode "desp=$desp"
+          # ========== 构造推送内容 ==========
+          date_str = now.strftime("%Y-%m-%d %H:%M")
+          title = f"A股涨跌家数（{date_str}）"
+          desp = (
+              f"📈 上涨家数：{up_total}（{up_ratio}%）\n"
+              f"📉 下跌家数：{down_total}（{down_ratio}%）\n"
+              f"📊 总家数：{total}"
+          )
+
+          print("📬 推送内容如下：\n" + desp)
+          push_serverchan(title, desp)
+          EOF
